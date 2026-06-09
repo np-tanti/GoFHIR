@@ -42,7 +42,7 @@
                └───────────────────────────────────────┘
 ```
 
-All modules live in a **single Go module** at `github.com/graphic/gofhir`. They communicate via internal Go interfaces — no RPC, no HTTP between modules.
+All modules live in a **single Go module** at `github.com/np-tanti/GoFHIR`. They communicate via internal Go interfaces — no RPC, no HTTP between modules.
 
 ---
 
