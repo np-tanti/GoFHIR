@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GoFHIR Reception</title>
+<link rel="stylesheet" href="/static/triage.css">
+</head>
+<body>
+<div id="app">
+  <div id="login-screen" class="screen active">
+    <div class="login-card">
+      <h1>GoFHIR Reception</h1>
+      <p class="subtitle">Patient Registration Desk</p>
+      <form id="login-form" method="POST" action="/auth/login" autocomplete="off">
+        <label for="username">Username</label>
+        <input type="text" id="username" autocomplete="username" required>
+        <label for="password">Password</label>
+        <input type="password" id="password" autocomplete="current-password" required>
+        <button type="submit">Login</button>
+        <p id="login-error" class="error hidden"></p>
+      </form>
+    </div>
+  </div>
+
+  <div id="dashboard-screen" class="screen">
+    <header class="dashboard-header">
+      <h1>Patient Registration</h1>
+      <div class="header-controls">
+        <span id="user-info" class="user-badge"></span>
+        <a href="/" class="header-link">ER Triage Board</a>
+        <button id="logout-btn">Logout</button>
+      </div>
+    </header>
+
+    <div class="reception-body">
+      <div class="form-panel">
+        <form id="patient-form" autocomplete="off">
+          <fieldset>
+            <legend>Identity</legend>
+            <label for="patient-id">Patient ID *</label>
+            <input type="text" id="patient-id" placeholder="e.g. PAT-003" required>
+            <label for="given-name">First Name *</label>
+            <input type="text" id="given-name" required>
+            <label for="family-name">Last Name *</label>
+            <input type="text" id="family-name" required>
+            <label for="active-status">Active Record</label>
+            <select id="active-status"><option value="true" selected>Yes</option><option value="false">No</option></select>
+          </fieldset>
+
+          <fieldset>
+            <legend>Demographics</legend>
+            <label for="gender">Gender</label>
+            <select id="gender">
+              <option value="male">Male</option>
+              <option value="female" selected>Female</option>
+              <option value="other">Other</option>
+              <option value="unknown">Unknown</option>
+            </select>
+            <label for="birth-date">Date of Birth *</label>
+            <input type="date" id="birth-date" required>
+            <label for="marital-status">Marital Status</label>
+            <select id="marital-status">
+              <option value="">Unknown</option>
+              <option value="M">Married</option>
+              <option value="S">Single</option>
+              <option value="D">Divorced</option>
+              <option value="W">Widowed</option>
+            </select>
+          </fieldset>
+
+          <fieldset>
+            <legend>Contact</legend>
+            <label for="phone">Phone</label>
+            <input type="tel" id="phone" placeholder="+1-555-123-4567">
+            <label for="email">Email</label>
+            <input type="email" id="email" placeholder="patient@example.com">
+            <label for="address-line">Address Line</label>
+            <input type="text" id="address-line" placeholder="123 Main St">
+            <label for="city">City</label>
+            <input type="text" id="city">
+            <label for="state">State / Province</label>
+            <input type="text" id="state">
+            <label for="postal-code">Postal Code</label>
+            <input type="text" id="postal-code">
+            <label for="country">Country</label>
+            <input type="text" id="country" value="US">
+          </fieldset>
+
+          <fieldset>
+            <legend>Emergency Contact</legend>
+            <label for="ec-name">Contact Name</label>
+            <input type="text" id="ec-name">
+            <label for="ec-relationship">Relationship</label>
+            <input type="text" id="ec-relationship" placeholder="Spouse, Parent, Sibling">
+            <label for="ec-phone">Contact Phone</label>
+            <input type="tel" id="ec-phone">
+          </fieldset>
+
+          <div class="form-actions">
+            <button type="submit" id="save-btn">Save Patient</button>
+            <button type="reset" id="reset-btn" class="btn-secondary">Reset</button>
+          </div>
+          <p id="form-status" class="form-status"></p>
+        </form>
+      </div>
+
+      <div class="preview-panel">
+        <h3>Patient Preview</h3>
+        <div id="patient-preview" class="preview-card">
+          <p class="muted">Fill in the form to see a preview.</p>
+        </div>
+        <div class="search-section">
+          <h3>Recent Patients</h3>
+          <div style="display:flex;gap:4px;margin-bottom:8px;">
+            <input type="text" id="search-id" placeholder="Patient ID" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:0.8rem;">
+            <button id="search-btn" style="padding:6px 12px;background:var(--primary);color:#fff;border:none;border-radius:4px;cursor:pointer;">Search</button>
+            <button id="refresh-list-btn" style="padding:6px 12px;background:var(--card);border:1px solid var(--border);border-radius:4px;cursor:pointer;">List</button>
+          </div>
+          <div id="patient-list" class="patient-list-box">
+            <p class="muted">No patients loaded.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+  </div>
+</div>
+
+<script src="/static/reception.js"></script>
+</body>
+</html>

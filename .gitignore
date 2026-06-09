@@ -1,0 +1,11 @@
+bin/
+data/*.db
+*.db
+.env
+*.key
+*.crt
+*.pem
+*.local
+*.db-journal
+*.db-wal
+flake.lock
