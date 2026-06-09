@@ -417,8 +417,8 @@ func (s *Store) Search(ctx context.Context, resourceType string, f SearchFilters
 		args = append(args, f.LastUpdated)
 	}
 	if f.Name != "" {
-		where = append(where, "json_extract(data, '$.name') LIKE ? ESCAPE '\\'")
-		args = append(args, "%"+f.Name+"%")
+		where = append(where, "(json_extract(data, '$.name') LIKE ? ESCAPE '\\' OR id LIKE ? ESCAPE '\\')")
+		args = append(args, "%"+f.Name+"%", "%"+f.Name+"%")
 	}
 	if f.Code != "" {
 		where = append(where, "json_extract(data, '$.code') LIKE ? ESCAPE '\\'")

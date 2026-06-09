@@ -82,13 +82,14 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "session creation failed"})
 		return
 	}
+	secure := r.TLS != nil
 	http.SetCookie(w, &http.Cookie{
-		Name:     "__Host-gofhir-session",
+		Name:     "gofhir-session",
 		Value:    sessionID,
 		Path:     "/",
-		Secure:   true,
+		Secure:   secure,
 		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 		MaxAge:   28800,
 	})
 	writeJSON(w, http.StatusOK, loginResponse{
@@ -99,17 +100,18 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	c, err := r.Cookie("__Host-gofhir-session")
+	c, err := r.Cookie("gofhir-session")
 	if err == nil && c.Value != "" {
 		_ = h.gkStore.DeleteSession(r.Context(), c.Value)
 	}
+	secure := r.TLS != nil
 	http.SetCookie(w, &http.Cookie{
-		Name:     "__Host-gofhir-session",
+		Name:     "gofhir-session",
 		Value:    "",
 		Path:     "/",
-		Secure:   true,
+		Secure:   secure,
 		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 	})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})

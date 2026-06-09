@@ -59,13 +59,13 @@
   let currentUser = null;
   logoutBtn.addEventListener('click', async () => {
     try { await apiFetch('/auth/logout', { method: 'POST' }); } catch (err) {}
-    currentUser = null; document.cookie = '__Host-gofhir-session=; Path=/; Max-Age=-1';
+    currentUser = null; document.cookie = 'gofhir-session=; Path=/; Max-Age=-1';
     showScreen(loginScreen);
   });
 
   function checkSession() {
     const cookies = document.cookie.split(';').map(c => c.trim());
-    if (cookies.some(c => c.startsWith('__Host-gofhir-session='))) {
+    if (cookies.some(c => c.startsWith('gofhir-session='))) {
       currentUser = { id: 'session', role: 'nurse' };
       enterDashboard();
     } else { showScreen(loginScreen); }

@@ -3,6 +3,7 @@
 
   let currentUser = null;
   let patientCache = {};
+  let activeSearch = '';
 
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => document.querySelectorAll(s);
@@ -75,14 +76,14 @@
 
   logoutBtn.addEventListener('click', async () => {
     try { await apiFetch('/auth/logout', { method: 'POST' }); } catch (err) {}
-    currentUser = null; document.cookie = '__Host-gofhir-session=; Path=/; Max-Age=-1';
+    currentUser = null; document.cookie = 'gofhir-session=; Path=/; Max-Age=-1';
     receiveEventSource && receiveEventSource.close();
     showScreen(loginScreen);
   });
 
   function checkSession() {
     const cookies = document.cookie.split(';').map(c => c.trim());
-    if (cookies.some(c => c.startsWith('__Host-gofhir-session='))) {
+    if (cookies.some(c => c.startsWith('gofhir-session='))) {
       currentUser = { id: 'session', role: 'nurse' };
       enterDashboard();
     } else { showScreen(loginScreen); }
@@ -118,60 +119,40 @@
 
   async function loadBoard() {
     try {
-      const [boardData, fhirData] = await Promise.all([
-        apiFetch('/triage/board'),
-        apiFetch('/fhir/patient').catch(() => ({ entry: [] })),
-      ]);
+      const boardData = await apiFetch('/triage/board');
       patientCache = {};
       boardData.patients.forEach(p => { patientCache[p.patient_id] = p; });
-      const fhirPatients = (fhirData.entry || []).map(e => e.resource || e);
-      fhirPatients.forEach(fp => {
-        if (!patientCache[fp.id]) {
-          const name = fp.name?.[0] ? (fp.name[0].given?.[0] || '') + ' ' + (fp.name[0].family || '') : fp.id;
-          const age = fp.birthDate ? (new Date().getFullYear() - new Date(fp.birthDate).getFullYear()) : 0;
-          patientCache[fp.id] = {
-            patient_id: fp.id, patient_name: name.trim(), gender: fp.gender || '',
-            age: age, esi: 3, chief_complaint: '', checked_in_at: null,
-            vitals: {}, _fhir: true,
-          };
-        }
-      });
+      activeSearch = '';
       renderBoardFromCache();
     } catch (err) { showToast('Failed to load board: ' + err.message, 'error'); }
   }
 
   function renderBoardFromCache() {
     const patients = Object.values(patientCache);
-    const checkedIn = patients.filter(p => !p.checked_out_at && !p._fhir);
-    const fhirOnly = patients.filter(p => p._fhir);
-    boardCount.textContent = checkedIn.length + ' active';
+    const active = patients.filter(p => !p.checked_out_at);
+    boardCount.textContent = active.length + ' active';
+
+    let searchFiltered = active;
+    if (activeSearch) {
+      const q = activeSearch.toLowerCase();
+      searchFiltered = active.filter(p =>
+        p.patient_id.toLowerCase().includes(q) ||
+        (p.patient_name && p.patient_name.toLowerCase().includes(q))
+      );
+    }
+
     Object.values(esiCols).forEach(el => {
       const level = parseInt(el.parentElement.dataset.level);
       el.innerHTML = '';
       const countEl = el.parentElement.querySelector('.esi-count') || (() => {
         const c = document.createElement('span'); c.className = 'esi-count'; el.parentElement.querySelector('h2').appendChild(c); return c;
       })();
-      const colPatients = checkedIn.filter(p => p.esi === level);
+      const colPatients = searchFiltered.filter(p => p.esi === level);
       countEl.textContent = colPatients.length;
-      if (colPatients.length === 0 && fhirOnly.length === 0) {
+      if (colPatients.length === 0) {
         el.innerHTML = '<p class="empty-msg" style="font-size:0.8rem;color:#999;text-align:center;">No patients</p>';
       }
       colPatients.forEach(p => { el.appendChild(createPatientCard(p)); });
-    });
-    if (fhirOnly.length > 0) {
-      const col = esiCols[3];
-      if (col.querySelector('.empty-msg')) col.innerHTML = '';
-      fhirOnly.forEach(p => {
-        const card = createPatientCard(p);
-        col.appendChild(card);
-      });
-    }
-    const checkedOut = patients.filter(p => p.checked_out_at);
-    checkedOut.forEach(p => {
-      const col = esiCols[p.esi] || esiCols[3];
-      const card = createPatientCard(p);
-      card.classList.add('checked-out');
-      col.appendChild(card);
     });
   }
 
@@ -189,10 +170,7 @@
       const v = p.vitals;
       html += '<div class="vitals-summary">BP ' + v.systolic_bp + '/' + v.diastolic_bp + ' | HR ' + v.heart_rate + ' | SpO2 ' + v.oxygen_sat + '%</div>';
     }
-    if (p._fhir) {
-      html += '<div class="patient-actions"><button class="checkin-board-btn" data-pid="' + p.patient_id + '" data-complaint="Other">Check In</button></div>';
-      html += '<div class="patient-meta" style="color:var(--primary);font-size:0.7rem;">In FHIR database — check in to add to board</div>';
-    } else if (!p.checked_out_at) {
+    if (!p.checked_out_at) {
       html += '<div class="patient-actions">';
       html += '<button class="vitals-btn" data-pid="' + p.patient_id + '">Vitals</button>';
       html += '<button class="checkout-btn" data-pid="' + p.patient_id + '">Check Out</button>';
@@ -208,15 +186,7 @@
     }
     card.innerHTML = html;
 
-    if (p._fhir) {
-      card.querySelector('.checkin-board-btn').addEventListener('click', async (e) => {
-        e.stopPropagation();
-        try {
-          await apiFetch('/triage/checkin', { method: 'POST', body: JSON.stringify({ patient_id: p.patient_id, chief_complaint: 'Other' }) });
-          showToast(p.patient_name + ' checked in', 'success');
-        } catch (err) { showToast('Checkin failed: ' + err.message, 'error'); }
-      });
-    } else if (!p.checked_out_at) {
+    if (!p.checked_out_at) {
       card.querySelector('.vitals-btn').addEventListener('click', (e) => {
         e.stopPropagation(); openVitalsModal(p.patient_id, name);
       });
@@ -269,20 +239,8 @@
   });
 
   searchBtn.addEventListener('click', () => {
-    const q = searchInput.value.trim();
-    if (q) {
-      const filtered = Object.values(patientCache).filter(p =>
-        p.patient_id.toLowerCase().includes(q.toLowerCase()) ||
-        (p.patient_name && p.patient_name.toLowerCase().includes(q.toLowerCase()))
-      );
-      Object.values(esiCols).forEach(el => {
-        el.innerHTML = '';
-        const level = parseInt(el.parentElement.dataset.level);
-        const match = filtered.filter(p => p.esi === level && !p.checked_out_at);
-        if (match.length === 0) el.innerHTML = '<p class="empty-msg" style="font-size:0.8rem;color:#999;text-align:center;">No patients</p>';
-        match.forEach(p => el.appendChild(createPatientCard(p)));
-      });
-    } else { renderBoardFromCache(); }
+    activeSearch = searchInput.value.trim();
+    renderBoardFromCache();
   });
   searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') searchBtn.click(); });
   refreshBtn.addEventListener('click', () => { searchInput.value = ''; loadBoard(); });
@@ -317,7 +275,7 @@
           suggestions.appendChild(div);
         });
         suggestions.classList.remove('hidden');
-      } catch (err) { /* ignore search errors */ }
+      } catch (err) { suggestions.innerHTML = '<div class="suggestion-item" style="color:#999;">Search error, type ID directly</div>'; suggestions.classList.remove('hidden'); }
     }, 300);
   });
 

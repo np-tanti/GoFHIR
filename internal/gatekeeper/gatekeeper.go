@@ -136,7 +136,7 @@ func isPublicPath(path string) bool {
 }
 
 func readSessionCookie(r *http.Request) string {
-	c, err := r.Cookie("__Host-gofhir-session")
+	c, err := r.Cookie("gofhir-session")
 	if err != nil {
 		return ""
 	}

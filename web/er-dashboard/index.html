@@ -12,11 +12,11 @@
     <div class="login-card">
       <h1>GoFHIR ER Dashboard</h1>
       <p class="subtitle">Emergency Department Triage System</p>
-      <form id="login-form" method="POST" action="/auth/login" autocomplete="off">
+      <form id="login-form" autocomplete="off">
         <label for="username">Username</label>
-        <input type="text" id="username" autocomplete="username" required>
+        <input type="text" id="username" name="username" autocomplete="username" required>
         <label for="password">Password</label>
-        <input type="password" id="password" autocomplete="current-password" required>
+        <input type="password" id="password" name="password" autocomplete="current-password" required>
         <button type="submit">Login</button>
         <p id="login-error" class="error hidden"></p>
       </form>
