@@ -60,7 +60,7 @@ func (h *FHIRHandler) CapabilityStatement(w http.ResponseWriter, r *http.Request
 		"status":        "draft",
 		"date":          time.Now().UTC().Format(FHIR_DATE_FMT),
 		"kind":          "instance",
-		"software":      map[string]string{"name": "gofhir", "version": "0.1.0"},
+		"software":      map[string]string{"name": "gofhir", "version": "0.2.0"},
 		"implementation": map[string]string{"description": "FHIR R4 API"},
 		"fhirVersion":   "4.0.1",
 		"format":        []string{"application/fhir+json"},

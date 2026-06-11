@@ -26,7 +26,7 @@
     toast.textContent = msg; toast.className = 'toast ' + type;
     toast.classList.remove('hidden');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toast.classList.add('hidden'), 4000);
+    toastTimer = setTimeout(() => toast.classList.add('hidden'), 3500);
   }
 
   function showScreen(s) { $$('.screen').forEach(x => x.classList.remove('active')); s.classList.add('active'); }
@@ -66,7 +66,7 @@
   function checkSession() {
     const cookies = document.cookie.split(';').map(c => c.trim());
     if (cookies.some(c => c.startsWith('gofhir-session='))) {
-      currentUser = { id: 'session', role: 'nurse' };
+      currentUser = { id: 'session', role: 'registration' };
       enterDashboard();
     } else { showScreen(loginScreen); }
   }
@@ -92,7 +92,7 @@
 
     const ms = $('#marital-status').value;
     if (ms) {
-      const display = { M: 'Married', S: 'Single', D: 'Divorced', W: 'Widowed' };
+      const display = { M: 'Married', S: 'Single', D: 'Divorced', W: 'Widowed', P: 'Partnered' };
       patient.maritalStatus = {
         coding: [{ system: 'http://terminology.hl7.org/CodeSystem/v3-MaritalStatus', code: ms, display: display[ms] }],
         text: display[ms],
@@ -138,24 +138,59 @@
     return patient;
   }
 
+  function calculateAge(dob) {
+    if (!dob) return null;
+    const today = new Date();
+    const birth = new Date(dob);
+    let age = today.getFullYear() - birth.getFullYear();
+    const monthDiff = today.getMonth() - birth.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+      age--;
+    }
+    return age;
+  }
+
   function renderPreview(patient, id) {
     const displayId = id || patient.id || $('#patient-id').value;
     const name = (patient.name?.[0]?.given?.[0] || '') + ' ' + (patient.name?.[0]?.family || '');
-    const msMap = { M: 'Married', S: 'Single', D: 'Divorced', W: 'Widowed' };
+    const msMap = { M: 'Married', S: 'Single', D: 'Divorced', W: 'Widowed', P: 'Partnered' };
     const ms = $('#marital-status').value;
     const phone = $('#phone').value.trim();
     const email = $('#email').value.trim();
+    const age = calculateAge($('#birth-date').value);
 
-    let html = '<h3 style="color:var(--primary);margin-bottom:8px;">' + name.trim() + '</h3>';
-    html += '<div class="preview-row"><span class="p-label">ID</span><span class="p-value">' + displayId + '</span></div>';
+    let html = '<h3 style="color:var(--primary);margin-bottom:6px;">' + name.trim() + '</h3>';
+    html += '<div class="preview-row"><span class="p-label">MRN</span><span class="p-value">' + displayId + '</span></div>';
     html += '<div class="preview-row"><span class="p-label">Status</span><span class="p-value">' + (patient.active !== false ? 'Active' : 'Inactive') + '</span></div>';
-    html += '<div class="preview-row"><span class="p-label">Gender</span><span class="p-value">' + patient.gender + '</span></div>';
+    html += '<div class="preview-row"><span class="p-label">Sex</span><span class="p-value">' + patient.gender.toUpperCase() + '</span></div>';
     html += '<div class="preview-row"><span class="p-label">DOB</span><span class="p-value">' + $('#birth-date').value + '</span></div>';
+    if (age !== null) html += '<div class="preview-row"><span class="p-label">Age</span><span class="p-value">' + age + ' years</span></div>';
     if (ms) html += '<div class="preview-row"><span class="p-label">Marital</span><span class="p-value">' + (msMap[ms] || ms) + '</span></div>';
     if (phone || email) {
       html += '<div class="preview-section-title">Contact</div>';
       if (phone) html += '<div class="preview-row"><span class="p-label">Phone</span><span class="p-value">' + phone + '</span></div>';
       if (email) html += '<div class="preview-row"><span class="p-label">Email</span><span class="p-value">' + email + '</span></div>';
+    }
+    const addrLine = $('#address-line').value.trim();
+    if (addrLine) {
+      html += '<div class="preview-section-title">Address</div>';
+      html += '<div class="preview-row"><span class="p-label"></span><span class="p-value">' + addrLine + '<br>';
+      const city = $('#city').value.trim();
+      const state = $('#state').value.trim();
+      const postal = $('#postal-code').value.trim();
+      if (city || state || postal) html += city + (state ? ', ' + state : '') + (postal ? ' ' + postal : '') + '<br>';
+      const country = $('#country').value.trim();
+      if (country) html += country;
+      html += '</span></div>';
+    }
+    const ecNameVal = $('#ec-name').value.trim();
+    if (ecNameVal) {
+      html += '<div class="preview-section-title">Emergency Contact</div>';
+      html += '<div class="preview-row"><span class="p-label">Name</span><span class="p-value">' + ecNameVal + '</span></div>';
+      const ecRelVal = $('#ec-relationship').value.trim();
+      if (ecRelVal) html += '<div class="preview-row"><span class="p-label">Relation</span><span class="p-value">' + ecRelVal + '</span></div>';
+      const ecPhoneVal = $('#ec-phone').value.trim();
+      if (ecPhoneVal) html += '<div class="preview-row"><span class="p-label">Phone</span><span class="p-value">' + ecPhoneVal + '</span></div>';
     }
     preview.innerHTML = html;
   }
@@ -176,7 +211,7 @@
     formStatus.textContent = ''; formStatus.className = 'form-status';
     const patient = buildPatient();
     if (!patient.name?.[0]?.family || !patient.name?.[0]?.given?.[0] || !patient.id || !patient.birthDate) {
-      formStatus.textContent = 'Please fill in all required fields (*)'; formStatus.className = 'form-status error';
+      formStatus.textContent = 'Please complete all required fields (*)'; formStatus.className = 'form-status error';
       return;
     }
     saveBtn.disabled = true; saveBtn.textContent = 'Saving...';
@@ -186,7 +221,7 @@
         headers: { 'Content-Type': 'application/fhir+json', 'X-Resource-Type': 'Patient' },
         body: JSON.stringify(patient),
       });
-      formStatus.textContent = 'Patient ' + data.id + ' created successfully';
+      formStatus.textContent = 'Patient ' + data.id + ' registered successfully';
       formStatus.className = 'form-status success';
       showToast('Patient ' + data.id + ' registered', 'success');
       loadPatientList();
@@ -194,26 +229,26 @@
       formStatus.textContent = 'Error: ' + err.message;
       formStatus.className = 'form-status error';
     } finally {
-      saveBtn.disabled = false; saveBtn.textContent = 'Save Patient';
+      saveBtn.disabled = false; saveBtn.textContent = 'Register Patient';
     }
   });
 
   resetBtn.addEventListener('click', () => {
     patientForm.reset();
-    preview.innerHTML = '<p class="muted">Fill in the form to see a preview.</p>';
+    preview.innerHTML = '<p class="muted">Complete form to preview patient record.</p>';
     formStatus.textContent = ''; formStatus.className = 'form-status';
   });
 
   async function loadPatientList() {
     try {
-      const data = await apiFetch('/fhir/patient');
+      const data = await apiFetch('/fhir/patient?_count=30');
       const entries = data.entry || [];
       if (entries.length === 0) {
         patientList.innerHTML = '<p class="muted">No patients found.</p>';
         return;
       }
       patientList.innerHTML = '';
-      entries.slice(0, 20).forEach(e => {
+      entries.forEach(e => {
         const r = e.resource || e;
         const name = (r.name?.[0]?.given?.[0] || '') + ' ' + (r.name?.[0]?.family || '');
         const div = document.createElement('div'); div.className = 'patient-list-item';

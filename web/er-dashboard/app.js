@@ -4,6 +4,7 @@
   let currentUser = null;
   let patientCache = {};
   let activeSearch = '';
+  let waitTimeInterval = null;
 
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => document.querySelectorAll(s);
@@ -39,7 +40,7 @@
     toast.textContent = msg; toast.className = 'toast ' + type;
     toast.classList.remove('hidden');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toast.classList.add('hidden'), 4000);
+    toastTimer = setTimeout(() => toast.classList.add('hidden'), 3500);
   }
 
   function showScreen(s) { $$('.screen').forEach(x => x.classList.remove('active')); s.classList.add('active'); }
@@ -52,7 +53,7 @@
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || 'Request failed (' + res.status + ')');
+      throw new Error(body.error || body.issue?.[0]?.diagnostics || 'Request failed (' + res.status + ')');
     }
     return res.json();
   }
@@ -60,6 +61,27 @@
   function broadcast(type, data) {
     const ev = new CustomEvent('triage-update', { detail: { type, data } });
     window.dispatchEvent(ev);
+  }
+
+  function formatWaitTime(checkinTime) {
+    if (!checkinTime) return '--';
+    const now = new Date();
+    const checkin = new Date(checkinTime);
+    const diffMs = now - checkin;
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 60) return diffMins + 'm';
+    const hrs = Math.floor(diffMins / 60);
+    const mins = diffMins % 60;
+    return hrs + 'h ' + mins + 'm';
+  }
+
+  function updateWaitTimes() {
+    $$('.wait-time').forEach(el => {
+      const pid = el.dataset.pid;
+      if (patientCache[pid] && patientCache[pid].checkin_time) {
+        el.textContent = formatWaitTime(patientCache[pid].checkin_time);
+      }
+    });
   }
 
   loginForm.addEventListener('submit', async (e) => {
@@ -78,6 +100,7 @@
     try { await apiFetch('/auth/logout', { method: 'POST' }); } catch (err) {}
     currentUser = null; document.cookie = 'gofhir-session=; Path=/; Max-Age=-1';
     receiveEventSource && receiveEventSource.close();
+    clearInterval(waitTimeInterval);
     showScreen(loginScreen);
   });
 
@@ -94,26 +117,30 @@
     showScreen(dashScreen);
     connectSSE();
     loadBoard();
+    waitTimeInterval = setInterval(updateWaitTimes, 60000);
   }
 
   let receiveEventSource = null;
   function connectSSE() {
     receiveEventSource && receiveEventSource.close();
     receiveEventSource = new EventSource('/events');
-    receiveEventSource.addEventListener('connected', () => showToast('Live connection established', 'success'));
+    receiveEventSource.addEventListener('connected', () => showToast('Connected to triage system', 'success'));
     receiveEventSource.addEventListener('checkin', (e) => {
       const d = JSON.parse(e.data); broadcast('checkin', d); renderBoardFromCache();
-      showToast(d.patient.patient_name + ' checked in (ESI ' + d.patient.esi + ')', 'success');
+      showToast(d.patient.patient_name + ' triaged (ESI ' + d.patient.esi + ')', 'success');
     });
     receiveEventSource.addEventListener('checkout', (e) => {
       const d = JSON.parse(e.data); broadcast('checkout', d); renderBoardFromCache();
-      showToast(d.patient.patient_name + ' checked out', 'success');
+      showToast(d.patient.patient_name + ' discharged from ED', 'success');
     });
     receiveEventSource.addEventListener('esi-update', (e) => {
       const d = JSON.parse(e.data); broadcast('esi-update', d); renderBoardFromCache();
     });
+    receiveEventSource.addEventListener('vitals-recorded', (e) => {
+      const d = JSON.parse(e.data); broadcast('vitals-recorded', d); renderBoardFromCache();
+    });
     receiveEventSource.onerror = () => {
-      showToast('Live connection lost, reconnecting...', 'error');
+      showToast('Connection lost, reconnecting...', 'error');
     };
   }
 
@@ -144,72 +171,90 @@
     Object.values(esiCols).forEach(el => {
       const level = parseInt(el.parentElement.dataset.level);
       el.innerHTML = '';
-      const countEl = el.parentElement.querySelector('.esi-count') || (() => {
-        const c = document.createElement('span'); c.className = 'esi-count'; el.parentElement.querySelector('h2').appendChild(c); return c;
-      })();
       const colPatients = searchFiltered.filter(p => p.esi === level);
-      countEl.textContent = colPatients.length;
+      const countEl = el.parentElement.querySelector('.esi-count');
+      if (countEl) countEl.textContent = colPatients.length;
+
       if (colPatients.length === 0) {
-        el.innerHTML = '<p class="empty-msg" style="font-size:0.8rem;color:#999;text-align:center;">No patients</p>';
+        el.innerHTML = '<p class="empty-msg">No patients</p>';
       }
       colPatients.forEach(p => { el.appendChild(createPatientCard(p)); });
     });
+
+    updateWaitTimes();
   }
 
   function createPatientCard(p) {
-    const card = document.createElement('div'); card.className = 'patient-card';
+    const card = document.createElement('div');
+    card.className = 'patient-card';
+    card.dataset.level = p.esi;
     const esiClass = 'esi-' + p.esi;
     const name = p.patient_name || p.patient_id;
-    let html = '<div class="patient-name"><span class="esi-badge ' + esiClass + '">ESI ' + p.esi + '</span>' + name + '</div>';
+    const waitTime = formatWaitTime(p.checkin_time);
+
+    let html = '<span class="wait-time" data-pid="' + p.patient_id + '">' + waitTime + '</span>';
+    html += '<div class="patient-name"><span class="esi-badge ' + esiClass + '">I'.repeat(p.esi) + '</span>' + name + '</div>';
     html += '<div class="patient-meta">' + p.patient_id;
-    if (p.gender) html += ' | ' + p.gender;
+    if (p.gender) html += ' | ' + p.gender.toUpperCase();
     if (p.age) html += ' | ' + p.age + 'y';
     html += '</div>';
     if (p.chief_complaint) html += '<div class="patient-complaint">' + p.chief_complaint + '</div>';
     if (p.vitals && p.vitals.systolic_bp) {
       const v = p.vitals;
-      html += '<div class="vitals-summary">BP ' + v.systolic_bp + '/' + v.diastolic_bp + ' | HR ' + v.heart_rate + ' | SpO2 ' + v.oxygen_sat + '%</div>';
+      html += '<div class="vitals-summary">BP ' + v.systolic_bp + '/' + v.diastolic_bp + ' HR ' + v.heart_rate + ' SpO2 ' + v.oxygen_sat + '%</div>';
     }
     if (!p.checked_out_at) {
       html += '<div class="patient-actions">';
-      html += '<button class="vitals-btn" data-pid="' + p.patient_id + '">Vitals</button>';
-      html += '<button class="checkout-btn" data-pid="' + p.patient_id + '">Check Out</button>';
+      html += '<button class="action-btn vitals-btn" data-pid="' + p.patient_id + '">Vitals</button>';
+      html += '<button class="action-btn discharge-btn" data-pid="' + p.patient_id + '">Discharge</button>';
       html += '</div>';
-      html += '<div class="esi-selector">';
-      html += 'ESI: <select class="esi-select" data-pid="' + p.patient_id + '">';
+      html += '<div class="esi-override">ESI: <select class="esi-select" data-pid="' + p.patient_id + '">';
       for (let i = 1; i <= 5; i++) {
         html += '<option value="' + i + '"' + (i === p.esi ? ' selected' : '') + '>' + i + '</option>';
       }
       html += '</select></div>';
-    } else {
-      html += '<div class="patient-meta" style="color:#999;">Checked out</div>';
     }
     card.innerHTML = html;
 
     if (!p.checked_out_at) {
-      card.querySelector('.vitals-btn').addEventListener('click', (e) => {
-        e.stopPropagation(); openVitalsModal(p.patient_id, name);
-      });
-      card.querySelector('.checkout-btn').addEventListener('click', (e) => {
-        e.stopPropagation(); doCheckout(p.patient_id);
-      });
-      card.querySelector('.esi-select').addEventListener('change', (e) => {
-        e.stopPropagation(); doSetESI(p.patient_id, parseInt(e.target.value));
-      });
+      const esiSelect = card.querySelector('.esi-select');
+      if (esiSelect) {
+        esiSelect.addEventListener('change', (e) => {
+          e.stopPropagation();
+          doSetESI(p.patient_id, parseInt(e.target.value));
+        });
+      }
+    }
+
+    if (!p.checked_out_at) {
+      const vitalsBtn = card.querySelector('.vitals-btn');
+      if (vitalsBtn) {
+        vitalsBtn.addEventListener('click', (e) => {
+          e.stopPropagation(); openVitalsModal(p.patient_id, name);
+        });
+      }
+      const checkoutBtn = card.querySelector('.checkout-btn');
+      if (checkoutBtn) {
+        checkoutBtn.addEventListener('click', (e) => {
+          e.stopPropagation(); doCheckout(p.patient_id);
+        });
+      }
     }
     return card;
   }
 
   async function doCheckout(pid) {
+    if (!confirm('Discharge patient from ED?')) return;
     try {
       await apiFetch('/triage/checkout', { method: 'POST', body: JSON.stringify({ patient_id: pid }) });
-      showToast('Patient checked out', 'success');
-    } catch (err) { showToast('Checkout failed: ' + err.message, 'error'); }
+      showToast('Patient discharged', 'success');
+    } catch (err) { showToast('Discharge failed: ' + err.message, 'error'); }
   }
 
   async function doSetESI(pid, esi) {
     try {
       await apiFetch('/triage/esi', { method: 'POST', body: JSON.stringify({ patient_id: pid, esi }) });
+      showToast('ESI updated to ' + esi, 'success');
     } catch (err) { showToast('ESI update failed: ' + err.message, 'error'); }
   }
 
@@ -219,13 +264,10 @@
       score = 1;
     } else if ((v.oxygen_sat >= 90 && v.oxygen_sat < 94) || v.systolic_bp < 100 || v.resp_rate > 24 || v.heart_rate > 140 || v.temperature > 39.5) {
       score = 2;
+    } else if (v.oxygen_sat >= 95 && v.heart_rate >= 50 && v.heart_rate <= 100 && v.resp_rate >= 10 && v.resp_rate <= 20 && v.systolic_bp >= 100 && v.systolic_bp < 140 && v.temperature >= 36.0 && v.temperature <= 37.5) {
+      score = 5;
     } else if (v.systolic_bp >= 100 && v.systolic_bp < 140 && v.heart_rate >= 60 && v.heart_rate <= 100 && v.resp_rate >= 12 && v.resp_rate <= 20 && v.oxygen_sat >= 95 && v.temperature >= 36.5 && v.temperature <= 38.0) {
       score = 4;
-    } else if (v.systolic_bp >= 90 && v.systolic_bp < 180 && v.heart_rate >= 50 && v.heart_rate <= 120 && v.resp_rate >= 10 && v.resp_rate <= 24 && v.oxygen_sat >= 95) {
-      score = 4;
-    }
-    if (v.oxygen_sat >= 95 && v.heart_rate >= 50 && v.heart_rate <= 100 && v.resp_rate >= 10 && v.resp_rate <= 20 && v.systolic_bp >= 100 && v.systolic_bp < 140 && v.temperature >= 36.0 && v.temperature <= 37.5) {
-      score = 5;
     }
     return Math.max(1, Math.min(5, score));
   }
@@ -262,7 +304,7 @@
         const entries = data.entry || [];
         suggestions.innerHTML = '';
         if (entries.length === 0) {
-          suggestions.innerHTML = '<div class="suggestion-item" style="color:#999;">No matches — will use typed ID</div>';
+          suggestions.innerHTML = '<div class="suggestion-item" style="color:#999;">No matches - will create new</div>';
           suggestions.classList.remove('hidden');
           return;
         }
@@ -275,7 +317,7 @@
           suggestions.appendChild(div);
         });
         suggestions.classList.remove('hidden');
-      } catch (err) { suggestions.innerHTML = '<div class="suggestion-item" style="color:#999;">Search error, type ID directly</div>'; suggestions.classList.remove('hidden'); }
+      } catch (err) { suggestions.innerHTML = '<div class="suggestion-item" style="color:#999;">Search error</div>'; suggestions.classList.remove('hidden'); }
     }, 300);
   });
 
@@ -283,7 +325,7 @@
     e.preventDefault(); checkinError.classList.add('hidden');
     const pid = checkinPID.value.trim();
     const complaint = chiefComplaint.value;
-    if (!pid) { checkinError.textContent = 'Patient ID required'; checkinError.classList.remove('hidden'); return; }
+    if (!pid) { checkinError.textContent = 'MRN required'; checkinError.classList.remove('hidden'); return; }
     try {
       const data = await apiFetch('/triage/checkin', {
         method: 'POST', body: JSON.stringify({ patient_id: pid, chief_complaint: complaint || 'Other' }),
@@ -353,7 +395,7 @@
         method: 'POST', body: JSON.stringify({ patient_id: pid, esi: recommendedESI }),
       });
       vitalsModal.classList.add('hidden');
-      showToast('Vitals saved for ' + pid + ' (ESI ' + recommendedESI + ')', 'success');
+      showToast('Vitals documented for ' + pid + ' (ESI ' + recommendedESI + ')', 'success');
     } catch (err) { vitalsError.textContent = err.message; vitalsError.classList.remove('hidden'); }
   });
 

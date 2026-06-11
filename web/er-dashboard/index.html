@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>GoFHIR ER Dashboard</title>
+<title>GoFHIR - Emergency Department Triage</title>
 <link rel="stylesheet" href="/static/triage.css">
 </head>
 <body>
 <div id="app">
   <div id="login-screen" class="screen active">
     <div class="login-card">
-      <h1>GoFHIR ER Dashboard</h1>
+      <h1>GoFHIR</h1>
       <p class="subtitle">Emergency Department Triage System</p>
       <form id="login-form" autocomplete="off">
         <label for="username">Username</label>
@@ -25,43 +25,43 @@
 
   <div id="dashboard-screen" class="screen">
     <header class="dashboard-header">
-      <h1>ER Triage Board</h1>
+      <h1>Emergency Department - Triage Board</h1>
       <div class="header-controls">
         <span id="user-info" class="user-badge"></span>
         <span id="board-count" class="board-count"></span>
-        <a href="/reception" class="header-link">Reception</a>
+        <a href="/reception" class="header-link">Registration</a>
         <button id="logout-btn">Logout</button>
       </div>
     </header>
 
     <div class="toolbar">
       <div class="search-box">
-        <input type="text" id="search-input" placeholder="Search patients by name or ID...">
-        <button id="search-btn">Search</button>
+        <input type="text" id="search-input" placeholder="Search by name or MRN...">
       </div>
-      <button id="checkin-btn" class="btn-primary">+ Check In Patient</button>
+      <button id="search-btn">Search</button>
+      <button id="checkin-btn" class="btn-primary">New Triage</button>
       <button id="refresh-btn">Refresh</button>
     </div>
 
     <div class="triage-board" id="triage-board">
       <div class="esi-column" data-level="1">
-        <h2>ESI 1 <span class="esi-label">Resuscitation</span></h2>
+        <h2>ESI I <span class="esi-label">Resuscitation</span> <span class="esi-count">0</span></h2>
         <div class="patient-list" id="esi-1"></div>
       </div>
       <div class="esi-column" data-level="2">
-        <h2>ESI 2 <span class="esi-label">Emergent</span></h2>
+        <h2>ESI II <span class="esi-label">Emergent</span> <span class="esi-count">0</span></h2>
         <div class="patient-list" id="esi-2"></div>
       </div>
       <div class="esi-column" data-level="3">
-        <h2>ESI 3 <span class="esi-label">Urgent</span></h2>
+        <h2>ESI III <span class="esi-label">Urgent</span> <span class="esi-count">0</span></h2>
         <div class="patient-list" id="esi-3"></div>
       </div>
       <div class="esi-column" data-level="4">
-        <h2>ESI 4 <span class="esi-label">Less Urgent</span></h2>
+        <h2>ESI IV <span class="esi-label">Less Urgent</span> <span class="esi-count">0</span></h2>
         <div class="patient-list" id="esi-4"></div>
       </div>
       <div class="esi-column" data-level="5">
-        <h2>ESI 5 <span class="esi-label">Non-Urgent</span></h2>
+        <h2>ESI V <span class="esi-label">Non-Urgent</span> <span class="esi-count">0</span></h2>
         <div class="patient-list" id="esi-5"></div>
       </div>
     </div>
@@ -69,23 +69,25 @@
     <div id="checkin-modal" class="modal hidden">
       <div class="modal-content">
         <span class="close-btn" data-modal="checkin-modal">&times;</span>
-        <h2>Check In Patient</h2>
+        <h2>Patient Triage Check-In</h2>
         <form id="checkin-form">
-          <label for="checkin-patient-id">Patient ID or Name</label>
-          <input type="text" id="checkin-patient-id" placeholder="Search or enter patient ID..." required>
+          <label for="checkin-patient-id">MRN or Patient Name</label>
+          <input type="text" id="checkin-patient-id" placeholder="Search or enter Medical Record Number..." required>
           <div id="patient-suggestions" class="suggestions hidden"></div>
-          <label for="chief-complaint">Chief Complaint</label>
+          <label for="chief-complaint">Presenting Complaint</label>
           <select id="chief-complaint" required>
             <option value="">Select complaint...</option>
-            <option value="Chest pain">Chest pain</option>
-            <option value="Shortness of breath">Shortness of breath</option>
-            <option value="Abdominal pain">Abdominal pain</option>
-            <option value="Headache">Headache</option>
-            <option value="Trauma">Trauma</option>
-            <option value="Fever">Fever</option>
-            <option value="Altered mental status">Altered mental status</option>
-            <option value="Bleeding">Bleeding</option>
-            <option value="Falls">Falls</option>
+            <option value="Chest pain">Chest Pain</option>
+            <option value="Shortness of breath">Dyspnea / SOB</option>
+            <option value="Abdominal pain">Abdominal Pain</option>
+            <option value="Headache">Headache / Cephalgia</option>
+            <option value="Trauma">Trauma / Injury</option>
+            <option value="Fever">Fever / Hyperthermia</option>
+            <option value="Altered mental status">Altered Mental Status</option>
+            <option value="Bleeding">Hemorrhage / Bleeding</option>
+            <option value="Falls">Mechanical Fall</option>
+            <option value="Stroke symptoms">CVA Symptoms</option>
+            <option value="Seizure">Seizure</option>
             <option value="Other">Other</option>
           </select>
           <button type="submit">Check In</button>
@@ -97,24 +99,26 @@
     <div id="vitals-modal" class="modal hidden">
       <div class="modal-content">
         <span class="close-btn" data-modal="vitals-modal">&times;</span>
-        <h2>Record Vitals</h2>
+        <h2>Vital Signs Documentation</h2>
         <form id="vitals-form">
           <input type="hidden" id="vitals-patient-id">
           <label>Patient</label>
           <p id="vitals-patient-display" class="patient-display"></p>
-          <label for="systolic">Systolic BP (mmHg)</label>
-          <input type="number" id="systolic" min="50" max="300" required>
-          <label for="diastolic">Diastolic BP (mmHg)</label>
-          <input type="number" id="diastolic" min="30" max="200" required>
+          <label for="systolic">SBP (mmHg)</label>
+          <input type="number" id="systolic" min="50" max="300" placeholder="Systolic" required>
+          <label for="diastolic">DBP (mmHg)</label>
+          <input type="number" id="diastolic" min="30" max="200" placeholder="Diastolic" required>
           <label for="heart-rate">Heart Rate (bpm)</label>
-          <input type="number" id="heart-rate" min="20" max="250" required>
-          <label for="resp-rate">Respiratory Rate</label>
-          <input type="number" id="resp-rate" min="4" max="60" required>
+          <input type="number" id="heart-rate" min="20" max="250" placeholder="HR" required>
+          <label for="resp-rate">Resp Rate (/min)</label>
+          <input type="number" id="resp-rate" min="4" max="60" placeholder="RR" required>
           <label for="oxygen-sat">SpO2 (%)</label>
-          <input type="number" id="oxygen-sat" min="50" max="100" required>
-          <label for="temperature">Temperature (°C)</label>
-          <input type="number" id="temperature" min="34" max="42" step="0.1" required>
-          <button type="submit">Save Vitals &amp; Update ESI</button>
+          <input type="number" id="oxygen-sat" min="50" max="100" placeholder="O2 sat" required>
+          <label for="temperature">Temp (°C)</label>
+          <input type="number" id="temperature" min="34" max="42" step="0.1" placeholder="Temp" required>
+          <label for="pain-score">Pain Score (0-10)</label>
+          <input type="number" id="pain-score" min="0" max="10" placeholder="0-10">
+          <button type="submit">Save Vitals & Update ESI</button>
           <p id="vitals-error" class="error hidden"></p>
         </form>
       </div>

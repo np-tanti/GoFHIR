@@ -1,8 +1,35 @@
 # GoFHIR - Micro-Gateway Architecture
 
+![Version](https://img.shields.io/badge/version-0.2.0-blue)
+![FHIR](https://img.shields.io/badge/FHIR-R4-orange)
+![Go](https://img.shields.io/badge/Go-1.25+-green)
+
 ## Overview
 
 GoFHIR is a FHIR R4 medical data gateway designed for Emergency Department triage. It has been refactored from a monolithic binary into **4 specialized microservices** that communicate via **Unix domain sockets** for secure local IPC.
+
+## Capability Highlight: Real-Time Triage Board
+
+GoFHIR provides a real-time Emergency Department triage board with Server-Sent Events (SSE) for live updates. Multiple users can monitor patient flow simultaneously.
+
+**Check in a patient:**
+```bash
+curl -X POST https://localhost/triage/checkin \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"patient_id": "pat-001", "chief_complaint": "Chest pain"}'
+```
+
+**Subscribe to live updates:**
+```javascript
+const eventSource = new EventSource('/events');
+eventSource.onmessage = (e) => {
+  const data = JSON.parse(e.data);
+  console.log('Triage update:', data);
+};
+```
+
+The triage board automatically organizes patients by ESI (Emergency Severity Index) levels 1-5, with real-time updates pushed to all connected clients via SSE.
 
 ---
 
