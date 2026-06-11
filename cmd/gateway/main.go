@@ -81,6 +81,8 @@ func main() {
 	mux.Handle("GET /static/", handler.NewStatic())
 	mux.HandleFunc("GET /reception", handler.NewReception())
 	mux.HandleFunc("GET /reception/", handler.NewReception())
+	mux.HandleFunc("GET /er", handler.NewDashboard())
+	mux.HandleFunc("GET /er/", handler.NewDashboard())
 	mux.HandleFunc("GET /", handler.NewDashboard())
 
 	var h http.Handler = mux

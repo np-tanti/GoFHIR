@@ -23,6 +23,8 @@ type Config struct {
 	RateLimitUnauth   int
 	RateLimitAuth     int
 	RateLimitBurst    int
+	RuntimeDir        string
+	FHIRDBPath        string
 }
 
 func Load() *Config {
@@ -44,6 +46,8 @@ func Load() *Config {
 		RateLimitUnauth:   envInt("GOFHIR_RL_UNAUTH", 5),
 		RateLimitAuth:     envInt("GOFHIR_RL_AUTH", 50),
 		RateLimitBurst:    envInt("GOFHIR_RL_BURST", 20),
+		RuntimeDir:        env("GOFHIR_RUNTIME_DIR", "/run/gofhir"),
+		FHIRDBPath:        env("GOFHIR_FHIR_DB_PATH", "data/gofhir_fhir.db"),
 	}
 }
 

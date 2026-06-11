@@ -1,456 +1,321 @@
-# GoFHIR Architecture & Integration Plan
+# GoFHIR - Micro-Gateway Architecture
 
-## Philosophy
+## Overview
 
-- Zero trust: every request is authenticated, authorized, audited
-- Stdlib-only networking: `crypto/tls`, `net/http`, `crypto/hmac` — no framework deps
-- Immutable logs: cryptographic chain guarantees audit integrity
-- Minimal surface: single statically-linked binary, no shell, no runtime deps
-
-## System Context
-
-```
-                    ┌──────────────────────────────┐
-                    │       NixOS Kiosk (HW)        │
-                    │  (Cage + Chromium kiosk mode) │
-                    └──────────┬───────────────────┘
-                               │ HTTPS (TLS 1.3)
-                               ▼
-               ┌───────────────────────────────────────┐
-               │          gofhir (single binary)        │
-               │                                       │
-               │  ┌──────────┐  ┌─────────────────┐    │
-               │  │ TLS Term │  │   Gatekeeper     │    │
-               │  │ (mTLS)   │→ │ (auth+rl+rbac)   │    │
-               │  └──────────┘  └────────┬────────┘    │
-               │                         │              │
-               │  ┌──────────────┐       │              │
-               │  │   Auditor    │←──────┘              │
-               │  │ (write-only) │                      │
-               │  └──────┬───────┘                      │
-               │         │                              │
-               │  ┌──────▼───────┐  ┌───────────────┐   │
-               │  │  FHIR-Core   │  │ Triage (mem)  │   │
-               │  │ (CRUD + DB)  │  │ + SSE Hub     │   │
-               │  └──────┬───────┘  └───────┬───────┘   │
-               │         │                  │           │
-               │  ┌──────▼──────────────────▼───────┐   │
-               │  │  Static Web (embedded via embed)  │   │
-               │  │  / → ER Triage Board              │   │
-               │  │  /reception → Patient Registration│   │
-               │  └──────────────────────────────────┘   │
-               └───────────────────────────────────────┘
-```
-
-All modules live in a **single Go module** at `github.com/np-tanti/GoFHIR`. They communicate via internal Go interfaces — no RPC, no HTTP between modules.
+GoFHIR is a FHIR R4 medical data gateway designed for Emergency Department triage. It has been refactored from a monolithic binary into **4 specialized microservices** that communicate via **Unix domain sockets** for secure local IPC.
 
 ---
 
-## 1. TLS Termination
+## Architecture
 
-**Purpose**: Edge termination of TLS 1.3, client certificate validation (mTLS), ACME auto-cert management.
-
-**Structure**:
 ```
-internal/
-  tls/
-    terminator.go      # net/http server with tls.Config
-    certstore.go       # Disk-based cert store with hot-reload
-    acme.go            # Let's Encrypt auto-renewal (golang.org/x/crypto/acme/autocert)
-```
-
-**Interface**:
-```go
-type Terminator interface {
-    ServeTLS(handler http.Handler) error
-    ReloadCert() error
-    ClientCAs() *x509.CertPool
-}
+┌──────────┐  Unix socket  ┌──────────────┐  Unix socket  ┌────────────┐
+│ TLS-Proxy ├──────────────►│ Gateway-Auth ├──────────────►│ FHIR-Core │
+│ :443     │  /run/gofhir/ │ :8081        │  /run/gofhir/ │ :8082     │
+└──────────┘  proxy.sock   └──────┬───────┘  fhir.sock   └────┬───────┘
+                                    │                            │
+                             Unix socket                   Unix socket
+                              /run/gofhir/                 /run/gofhir/
+                               audit.sock                   audit.sock
+                                    │                            │
+                                    ▼                            ▼
+                             ┌──────────────┐            ┌───────┴───────┐
+                             │ Audit-Service │            │  (audit log)  │
+                             │ :8083         │            └───────────────┘
+                             └──────────────┘
 ```
 
-**Integration**:
-- Wraps the entire HTTP pipeline with `crypto/tls`
-- Extracts client cert CN → passes as `X-Client-CN` header to Gatekeeper
-- Supports mutual TLS (mTLS) for machine-to-machine auth
+### Services
+
+| Service | Binary | Purpose | Socket |
+|---|---|---|---|
+| **TLS-Proxy** | `bin/tls-proxy` | TLS 1.3 termination, mTLS support | Forwards to `auth.sock` |
+| **Gateway-Auth** | `bin/gateway-auth` | JWT/OIDC verification, rate limiting, RBAC | Listens on `auth.sock`, forwards to `fhir.sock` |
+| **FHIR-Core** | `bin/fhir-core` | FHIR R4 API, versioned storage, triage board, SSE | Listens on `fhir.sock` |
+| **Audit-Service** | `bin/audit-service` | Immutable audit log with cryptographic chaining | Listens on `audit.sock` |
 
 ---
 
-## 2. Gatekeeper
+## Quick Start
 
-**Purpose**: Authentication, authorization, rate limiting.
+### Prerequisites
 
-**Structure**:
-```
-internal/
-  gatekeeper/
-    gatekeeper.go       # Middleware chain
-    auth.go             # JWT/API key verification
-    rbac.go             # Role-based access (nurse, admin, system, auditor)
-    ratelimit.go        # Per-IP, per-role token bucket
-    store.go            # Session/API key store (SQLite-backed)
-```
+- Go 1.26+ (or use Nix dev shell: `nix develop`)
+- SQLite3
+- OpenSSL (for generating keys)
 
-**Auth methods** (configurable):
-| Method | Use Case |
-|---|---|
-| Bearer JWT (Ed25519) | Dashboard users, delegated auth |
-| `X-API-Key` header | Machine-to-machine, kiosk |
-| mTLS client cert | Internal service auth |
-| Session cookie | Nurse dashboard (password + bcrypt) |
+### Build
 
-**RBAC roles**:
-```
-admin       → full access, auditor read
-nurse       → read/write patients
-system      → machine accounts, API key only
-auditor     → read-only audit log
+```bash
+nix develop  # Enter Nix dev shell
+make build      # Build all binaries to bin/
 ```
 
-**Rate limiting**:
-- Token bucket per IP (std `golang.org/x/time/rate`)  
-- Burst limit: 20, Sustained: 5/s for unauth, 50/s for authenticated
+### Run All Services (Development)
 
-**Integration**:
-- Wraps all HTTP handlers
-- On auth success, enriches context with `ctxutil.User{ID, Role, SessionID}`
-- Public paths: `/`, `/reception`, `/static/`, `/auth/login`, `/auth/logout`, `/live`, `/ready`
+```bash
+export GOFHIR_AUDIT_HMAC_KEY=$(openssl rand -hex 32)
+export GOFHIR_JWT_SECRET=$(openssl rand -hex 32)
+
+# Seed databases
+bin/seed
+
+# Start all services
+./scripts/start-all.sh
+```
+
+### Manual Start (Production)
+
+```bash
+# 1. Create socket directory
+sudo mkdir -p /run/gofhir
+sudo chown $(whoami):$(whoami) /run/gofhir
+sudo chmod 0750 /run/gofhir
+
+# 2. Start Audit-Service (first, others depend on it)
+GOFHIR_DB_PATH=data/gofhir.db \
+GOFHIR_AUDIT_HMAC_KEY=... \
+./bin/audit-service &
+
+# 3. Start FHIR-Core
+GOFHIR_FHIR_DB_PATH=data/gofhir_fhir.db \
+./bin/fhir-core &
+
+# 4. Start Gateway-Auth
+GOFHIR_GK_DB_PATH=data/gatekeeper.db \
+GOFHIR_JWT_SECRET=... \
+./bin/gateway-auth &
+
+# 5. Start TLS-Proxy (requires TLS certs)
+GOFHIR_TLS_CERT=/path/to/cert.pem \
+GOFHIR_TLS_KEY=/path/to/key.pem \
+./bin/tls-proxy &
+```
 
 ---
 
-## 3. Immutable Auditor
+## Environment Variables
 
-**Purpose**: Write-only append log with cryptographic chaining.
+### All Services
 
-**Structure**:
-```
-internal/
-  auditor/
-    chain.go            # Cryptographic chain logic
-    entry.go            # Log entry schema
-    store.go            # SQLite-backed append-only store
-```
+| Variable | Default | Description |
+|---|---|---|
+| `GOFHIR_RUNTIME_DIR` | `/run/gofhir` | Directory for Unix sockets |
 
-**Cryptographic chain**:
-```go
-type Entry struct {
-    Seq       uint64    // Monotonic sequence
-    PrevHash  [32]byte  // SHA256 of previous entry
-    Timestamp int64     // Unix nano
-    Action    string    // "login", "patient.create", etc.
-    ActorID   string
-    SessionID string
-    Payload   []byte
-    HMAC      [32]byte  // HMAC-SHA256(key, ...)
-}
-```
+### TLS-Proxy
 
-**Verifier binary** (`cmd/audit-verify`): Reads the audit DB and reports the first broken chain link.
+| Variable | Default | Description |
+|---|---|---|
+| `GOFHIR_TLS_PORT` | `443` | HTTPS listen port |
+| `GOFHIR_TLS_CERT` | **required** | Path to TLS certificate |
+| `GOFHIR_TLS_KEY` | **required** | Path to TLS private key |
+| `GOFHIR_TLS_CA` | *optional* | Client CA for mTLS |
+| `GOFHIR_MTLS_ENABLED` | `false` | Enable mTLS |
 
----
+### Gateway-Auth
 
-## 4. FHIR-Core
+| Variable | Default | Description |
+|---|---|---|
+| `GOFHIR_GK_DB_PATH` | `data/gatekeeper.db` | Gatekeeper database path |
+| `GOFHIR_JWT_SECRET` | *optional* | Ed25519 secret (32 hex bytes) |
+| `GOFHIR_AUDIT_HMAC_KEY` | **required** | HMAC key for audit log |
+| `GOFHIR_RL_UNAUTH` | `10` | Rate limit for unauthenticated requests |
+| `GOFHIR_RL_AUTH` | `100` | Rate limit for authenticated requests |
+| `GOFHIR_RL_BURST` | `50` | Burst limit |
 
-**Purpose**: FHIR R4 resource processing, versioned storage, search.
+### Audit-Service
 
-**Structure**:
-```
-internal/
-  fhir/
-    storage/
-      store.go           # Versioned SQLite (CGO-free with modernc.org/sqlite)
-      store_test.go
-      search_test.go
-```
+| Variable | Default | Description |
+|---|---|---|
+| `GOFHIR_DB_PATH` | `data/gofhir.db` | Audit database path |
+| `GOFHIR_AUDIT_HMAC_KEY` | **required** | HMAC key for audit chain |
 
-**Key operations**: Create, Read (latest + specific version), Update, SoftDelete, Search (by _id, name, code, subject, _lastUpdated), History.
+### FHIR-Core
 
-**Integration**: FHIR-Core handler is wrapped by Gatekeeper middleware. User info extracted from context via `ctxutil.UserFrom(ctx)`.
+| Variable | Default | Description |
+|---|---|---|
+| `GOFHIR_FHIR_DB_PATH` | `data/gofhir_fhir.db` | FHIR database path |
+| `GOFHIR_CORS_ORIGIN` | `*` | CORS origin header |
 
 ---
 
-## 5. Triage Board (In-Memory + SSE)
+## Security Features
 
-**Purpose**: Real-time Emergency Department triage board with Server-Sent Events.
+### Zero Trust
+- Every request is **authenticated**, **authorized**, and **audited**
+- No direct access to FHIR-Core from outside (only via Gateway-Auth)
 
-**Structure**:
-```
-internal/
-  triage/
-    store.go       # Thread-safe in-memory patient board
-    sse.go         # SSE hub for live broadcasting
-```
+### Immutable Audit Log
+- Cryptographic chain (SHA-256 hash of previous entry)
+- HMAC-SHA256 for integrity verification
+- Append-only (SQLite triggers prevent UPDATE/DELETE)
+- Offline verification tool: `bin/audit-verify`
 
-**TriageStore**: In-memory map of checked-in patients. Each patient has:
-- PatientID, PatientName, Gender, Age
-- ESI level (1-5, auto-computed from vitals)
-- Chief complaint, check-in/out timestamps
-- Current vital signs (BP, HR, RR, SpO2, temp)
+### Fail-Closed
+- Gateway-Auth **refuses all requests** if Audit-Service is unreachable
+- Patient data must never be accessed without an audit trail
 
-**SSE Hub**: Manages client subscriptions. On every check-in, check-out, ESI update, or vitals recording, broadcasts an event to all connected clients. Slow clients are dropped after buffer overflow.
+### Unix Socket Permissions
+- Sockets created with `0660` permissions
+- Only the `gofhir` group can access sockets
+- No network exposure
 
-**API endpoints**:
+### TLS 1.3
+- Enforced by TLS-Proxy
+- Optional mTLS for machine-to-machine auth
+
+---
+
+## API Endpoints
+
+### FHIR R4 API (via Gateway-Auth → FHIR-Core)
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/triage/board` | All active (checked-in) patients |
-| POST | `/triage/checkin` | Check in a FHIR patient by ID |
-| POST | `/triage/checkout` | Check out / discharge a patient |
-| POST | `/triage/esi` | Override ESI score for a patient |
-| GET | `/events` | SSE stream (checkin, checkout, esi-update events) |
+| `GET` | `/fhir/` | CapabilityStatement |
+| `POST` | `/fhir/` | Create Patient |
+| `GET` | `/fhir/Patient/{id}` | Read Patient |
+| `PUT` | `/fhir/Patient/{id}` | Update Patient |
+| `DELETE` | `/fhir/Patient/{id}` | Delete Patient (soft) |
+| `GET` | `/fhir/Patient` | Search Patients |
+| `GET` | `/fhir/Patient/{id}/_history` | Version history |
 
-**SSE event types**:
-- `checkin` — patient added to board
-- `checkout` — patient discharged
-- `esi-update` — ESI level changed
-- `connected` — confirmation of SSE connection
-
-**Integration**: Triage handler references the FHIR store to resolve patient details on check-in. No persistence — board resets on gateway restart.
-
----
-
-## 6. Reception (Patient Registration)
-
-**Purpose**: Registration desk UI for creating new FHIR Patient resources.
-
-**Structure**:
-```
-web/
-  er-dashboard/
-    reception.html     # Registration form page
-    reception.js       # Form handling, FHIR POST, patient search
-```
-
-**Features**:
-- Full patient registration form (identity, demographics, contact, emergency contact)
-- Live FHIR JSON preview card updates on every keystroke
-- POST to `/fhir/` to create the resource
-- Patient search sidebar (load existing patients into form)
-- Validation of required fields before submission
-
-**API endpoints consumed**:
+### Triage Board (via Gateway-Auth → FHIR-Core)
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/fhir/` | Create Patient resource |
-| GET | `/fhir/patient` | List/search existing patients |
-| GET | `/fhir/patient?_id={id}` | Search by patient ID |
-| POST | `/auth/login` | Session login |
+| `GET` | `/triage/board` | All active patients |
+| `POST` | `/triage/checkin` | Check in patient |
+| `POST` | `/triage/checkout` | Check out patient |
+| `POST` | `/triage/esi` | Set ESI level (1-5) |
+| `GET` | `/events` | SSE stream |
 
----
+### Audit (via Gateway-Auth → Audit-Service)
 
-## 7. ER Nurse Dashboard
-
-**Purpose**: Fast triage dashboard for Emergency Room nurses.
-
-**Structure**:
-```
-web/
-  er-dashboard/
-    index.html            # SPA shell with login + triage board
-    app.js                # Vanilla JS: SSE, check-in/out, vitals, ESI scoring
-    triage.css            # ESI 1-5 acuity color coding
-```
-
-**Frontend** (vanilla JS, zero deps):
-- ESI 1-5 priority columns with color-coded patient cards
-- Real-time updates via SSE (`/events`)
-- Patient search (board + FHIR store)
-- Vitals recording (POST to `/fhir/` + auto-ESI computed server-side)
-- Check-in / check-out workflow
-- Inline ESI override dropdown
-- Navigation link to Reception page
-
-**ESI Auto-Scoring** (computed on vitals submit):
-| ESI | Criteria |
-|---|---|
-| 1 | SpO2 < 90%, or SBP < 90 with HR > 120, or RR < 8 or > 30, or HR > 180 or < 40 |
-| 2 | SpO2 90-93%, or SBP < 100, or RR > 24, or HR > 140, or temp > 39.5°C |
-| 3 | Default — does not meet 1, 2, 4, or 5 criteria |
-| 4 | Normal vitals (SBP 100-139, HR 60-100, RR 12-20, SpO2 ≥ 95%, temp 36.5-38.0°C) |
-| 5 | No distress, minimal workup needed |
-
----
-
-## 8. Seed Data
-
-**File**: `cmd/seed/main.go`
-
-Creates three test users with bcrypt-passwords, API keys, sample FHIR resources, and an audit seed entry:
-
-| Username | Password | Role |
+| Method | Path | Description |
 |---|---|---|
-| `nurse-1` | `nurse123` | nurse |
-| `admin-1` | `admin123` | admin |
-| `auditor-1` | `auditor123` | auditor |
+| `POST` | `/audit/event` | Append audit entry (internal) |
+| `GET` | `/audit/entries` | Read audit log (auditor-only) |
 
-Also creates `pat-001`, `pat-002` (Patient resources) and `obs-001`, `obs-002` (Observation resources). All operations are idempotent.
+### Health Checks
+
+| Method | Path | Service |
+|---|---|---|
+| `GET` | `/live` | All services |
+| `GET` | `/ready` | All services |
 
 ---
 
-## Project Structure
+## Development
+
+### Project Structure
 
 ```
 GoFHIR/
-├── go.mod
-├── webui_root.go                # //go:embed web/er-dashboard (package webui)
-├── ARCHITECTURE.md
-│
 ├── cmd/
-│   ├── gateway/main.go          # Production entry point — wires all modules
-│   ├── seed/main.go             # Seed test data (users, FHIR resources)
-│   ├── migrate/main.go          # DB schema migration
-│   └── audit-verify/main.go     # Offline audit chain integrity checker
+│   ├── tls-proxy/main.go          # TLS termination
+│   ├── gateway-auth/main.go        # Auth + rate limiting
+│   ├── audit-service/main.go       # Immutable audit
+│   ├── fhir-core/main.go          # FHIR API + triage
+│   ├── gateway/main.go             # Monolithic (deprecated)
+│   ├── seed/main.go               # Seed test data
+│   ├── migrate/main.go            # DB migrations
+│   └── audit-verify/main.go       # Offline audit verification
 │
 ├── internal/
-│   ├── tls/
-│   │   └── terminator.go        # TLS 1.3 with optional mTLS
-│   │
-│   ├── gatekeeper/
-│   │   ├── gatekeeper.go        # Middleware: auth + rate limit + RBAC
-│   │   ├── auth.go              # JWT (Ed25519), bcrypt, API key generation
-│   │   ├── rbac.go              # Role/permission definitions
-│   │   ├── ratelimit.go         # Token bucket per IP
-│   │   ├── store.go             # SQLite store: users, sessions, API keys
-│   │   ├── auth_test.go
-│   │   ├── rbac_test.go
-│   │   ├── ratelimit_test.go
-│   │   └── store_test.go
-│   │
-│   ├── auditor/
-│   │   ├── chain.go             # SHA256 chain + HMAC
-│   │   ├── entry.go             # Entry schema
-│   │   ├── store.go             # Append-only SQLite
-│   │   ├── chain_test.go
-│   │   └── store_test.go
-│   │
-│   ├── fhir/
-│   │   └── storage/
-│   │       ├── store.go         # Versioned FHIR resource SQLite store
-│   │       ├── store_test.go
-│   │       └── search_test.go
-│   │
-│   ├── triage/
-│   │   ├── store.go             # In-memory triage board
-│   │   └── sse.go               # Server-Sent Events hub
-│   │
-│   ├── handler/
-│   │   ├── fhir.go              # FHIR HTTP handlers (CRUD + search)
-│   │   ├── auth.go              # POST /auth/login (JSON + form-encoded)
-│   │   ├── auth.go              # POST /auth/logout
-│   │   ├── audit.go             # GET /audit/entries
-│   │   ├── health.go            # GET /live, GET /ready, CORS middleware
-│   │   ├── triage.go            # Check-in/out/ESI/board handlers
-│   │   └── static.go            # Embedded dashboard + reception serving
-│   │
-│   ├── ctxutil/
-│   │   └── context.go           # User{ID, Role, SessionID} in request context
-│   │
-│   └── config/
-│       └── config.go            # Environment-based config (16 vars)
+│   ├── netutil/unixsocket.go      # Unix socket transport
+│   ├── tls/                      # TLS termination logic
+│   ├── gatekeeper/                # Auth, RBAC, rate limiting
+│   ├── auditor/                   # Audit chain + storage
+│   ├── fhir/storage/             # FHIR resource storage
+│   ├── triage/                    # Triage board + SSE
+│   └── config/config.go           # Environment-based config
 │
 ├── web/
-│   └── er-dashboard/
-│       ├── index.html           # ER Triage Board SPA
-│       ├── reception.html       # Patient Registration SPA
-│       ├── app.js               # Triage board logic + SSE client
-│       ├── reception.js         # Registration form logic
-│       └── triage.css           # ESI 1-5 colors + layout
+│   └── er-dashboard/             # Static web UI
+│       ├── index.html             # ER Triage Board
+│       ├── reception.html         # Patient Registration
+│       ├── app.js                 # Triage logic + SSE
+│       └── reception.js           # Registration form logic
 │
-├── data/                        # SQLite DB mount point (gitignored)
-├── flake.nix                    # Nix dev shell (Go 1.26, gopls, golangci-lint)
-├── Makefile
-└── .gitignore
+├── scripts/
+│   └── start-all.sh              # Start all services (dev)
+│
+├── data/                          # SQLite databases
+├── flake.nix                     # Nix dev shell
+├── Makefile                      # Build targets
+└── README.md
 ```
 
----
-
-## Data Flow: Patient Check-In
-
-```
-Nurse opens ER Dashboard (/)
-  │
-  │ GET /  → loads index.html + app.js
-  │ POST /auth/login → session cookie set
-  ▼
-┌─────────────────────────────────────────────┐
-│ Gatekeeper Middleware                        │
-│ • Authenticate via session cookie            │
-│ • RBAC: nurse → allow triage:write          │
-│ • Rate limit: check token bucket            │
-│ → Inject user context                       │
-└────────────────┬────────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────────┐
-│ Auditor Middleware                           │
-│ → Log triage.checkin action                 │
-└────────────────┬────────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────────┐
-│ TriageHandler.CheckIn                        │
-│ 1. Read Patient from FHIR store by ID       │
-│ 2. Extract name, age, gender                │
-│ 3. Add to in-memory TriageStore             │
-│ 4. Broadcast "checkin" event via SSE hub    │
-│ 5. Return triage.Patient JSON               │
-└─────────────────────────────────────────────┘
-                 │
-                 ▼
-           SSE broadcast → all connected browsers update board
-```
-
----
-
-## Dependencies
-
-| Module | External Deps | Rationale |
-|---|---|---|
-| `crypto/tls` | stdlib | TLS 1.3 |
-| `net/http` | stdlib | HTTP server |
-| `database/sql` | stdlib | DB interface |
-| `modernc.org/sqlite` | **pure Go** | SQLite driver (CGO-free) |
-| `golang.org/x/time/rate` | **x库** | Token bucket rate limiter |
-| `golang.org/x/crypto` | **x库** | Ed25519, bcrypt |
-| `encoding/json` | stdlib | JSON |
-| `crypto/hmac` + `crypto/sha256` | stdlib | Audit chain |
-| `embed` | stdlib | Static file embedding |
-
-**Total external**: 3 packages. **Router**: std `net/http` mux (Go 1.22+ pattern matching).
-
----
-
-## Security Properties
-
-| Threat | Mitigation |
-|---|---|
-| TLS eavesdropping | TLS 1.3, HSTS, mTLS for machine clients |
-| Token theft | Short-lived session (8h), HttpOnly cookies, Secure flag |
-| Audit tampering | SHA256 chain + HMAC per entry, offline verifier |
-| Rate limit bypass | Token bucket per IP, per session |
-| SQL injection | Parameterized queries throughout |
-| Supply chain | `go mod verify`, no CGO |
-| Log forgery | HMAC key in env only, never logged |
-
----
-
-## Launch
+### Testing
 
 ```bash
-nix develop
+# Run all tests
+nix develop -c go test ./... -count=1
 
-mkdir -p data
-KEY=$(head -c 32 /dev/urandom | od -A n -t x1 | tr -d ' \n')
-GOFHIR_AUDIT_HMAC_KEY=$KEY go run ./cmd/seed
-GOFHIR_AUDIT_HMAC_KEY=$KEY go run ./cmd/gateway
+# Build and test
+make build
+make test
+
+# Lint
+make lint
 ```
 
-Then open `http://localhost:8080` (ER Triage Board) or `http://localhost:8080/reception` (Registration Desk). Log in with `nurse-1` / `nurse123`.
+### Seeding Test Data
+
+```bash
+export GOFHIR_AUDIT_HMAC_KEY=$(openssl rand -hex 32)
+
+bin/seed
+```
+
+Creates:
+- Users: `nurse-1/nurse123` (nurse), `admin-1/admin123` (admin), `auditor-1/auditor123` (auditor)
+- API keys for each user
+- Sample patients: `pat-001`, `pat-002`
+- Sample observations: `obs-001`, `obs-002`
 
 ---
 
-## Test
+## Migration from Monolith
 
-```bash
-CGO_ENABLED=0 go test ./... -count=1
-```
+The monolithic `cmd/gateway/main.go` is still available but deprecated. To migrate:
+
+1. **Stop the monolith**
+   ```bash
+   pkill -f 'bin/gateway'
+   ```
+
+2. **Start microservices**
+   ```bash
+   ./scripts/start-all.sh
+   ```
+
+3. **Verify functionality**
+   - Open `https://localhost/` (ER Triage Board)
+   - Open `https://localhost/reception` (Patient Registration)
+   - Log in with `nurse-1/nurse123`
+
+---
+
+## License
+
+[Add your license here]
+
+---
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Run tests: `make test`
+4. Run linter: `make lint`
+5. Submit a pull request
+
+---
+
+## Support
+
+For issues and questions:
+- GitHub Issues: [link]
+- Documentation: See `ARCHITECTURE.md` for detailed design

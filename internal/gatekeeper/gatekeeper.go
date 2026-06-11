@@ -122,6 +122,7 @@ var publicPaths = map[string]bool{
 	"/live":        true,
 	"/ready":       true,
 	"/":            true,
+	"/er":          true,
 	"/reception":   true,
 }
 
@@ -129,7 +130,7 @@ func isPublicPath(path string) bool {
 	if publicPaths[path] {
 		return true
 	}
-	if strings.HasPrefix(path, "/static/") || strings.HasPrefix(path, "/reception/") {
+	if strings.HasPrefix(path, "/static/") || strings.HasPrefix(path, "/reception/") || strings.HasPrefix(path, "/er/") {
 		return true
 	}
 	return false
