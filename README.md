@@ -327,7 +327,7 @@ The monolithic `cmd/gateway/main.go` is still available but deprecated. To migra
 
 ## License
 
-[Add your license here]
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
