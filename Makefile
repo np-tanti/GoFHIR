@@ -1,7 +1,7 @@
 .PHONY: run build test vet fmt clean lint
 
 # Build all services
-BINS = bin/gateway bin/tls-proxy bin/gateway-auth bin/audit-service bin/fhir-core bin/audit-verify bin/migrate bin/seed
+BINS = bin/gateway bin/tls-proxy bin/gateway-auth bin/audit-service bin/fhir-core bin/audit-verify bin/migrate bin/seed bin/secrets
 
 run:
 	go run ./cmd/gateway
@@ -39,6 +39,10 @@ bin/migrate:
 bin/seed:
 	mkdir -p bin
 	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o $@ ./cmd/seed
+
+bin/secrets:
+	mkdir -p bin
+	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o $@ ./cmd/secrets
 
 test:
 	go test ./... -count=1

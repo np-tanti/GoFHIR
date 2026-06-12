@@ -3,6 +3,7 @@ set -euo pipefail
 
 # Start all GoFHIR microservices for local development
 # This script creates the socket directory and starts all services
+# Uses encrypted secrets file for GOFHIR_* environment variables
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -19,16 +20,28 @@ echo "Runtime directory: $RUNTIME_DIR"
 echo ""
 
 # Build binaries if they don't exist
-if [ ! -f "$PROJECT_DIR/bin/fhir-core" ]; then
+if [ ! -f "$PROJECT_DIR/bin/secrets" ]; then
     echo "Building binaries..."
     cd "$PROJECT_DIR"
     make build
 fi
 
-# Export environment variables
+# Initialize secrets file if it doesn't exist
+SECRETS_FILE="${GOFHIR_SECRETS_FILE:-$HOME/.gofhir/secrets.enc}"
+if [ ! -f "$SECRETS_FILE" ]; then
+    echo "Initializing secrets file..."
+    "$PROJECT_DIR/bin/secrets" init
+    "$PROJECT_DIR/bin/secrets" rotate-all
+    echo "Secrets file initialized at $SECRETS_FILE"
+    echo ""
+fi
+
+# Export environment variables from secrets file
+# This allows backward compatibility with services that don't use secrets file natively
+eval "$("$PROJECT_DIR/bin/secrets" export)"
+
+# Set additional environment variables
 export GOFHIR_RUNTIME_DIR="$RUNTIME_DIR"
-export GOFHIR_AUDIT_HMAC_KEY="${GOFHIR_AUDIT_HMAC_KEY:-$(openssl rand -hex 32)}"
-export GOFHIR_JWT_SECRET="${GOFHIR_JWT_SECRET:-$(openssl rand -hex 32)}"
 export GOFHIR_DB_PATH="${GOFHIR_DB_PATH:-$PROJECT_DIR/data/gofhir.db}"
 export GOFHIR_FHIR_DB_PATH="${GOFHIR_FHIR_DB_PATH:-$PROJECT_DIR/data/gofhir_fhir.db}"
 export GOFHIR_GK_DB_PATH="${GOFHIR_GK_DB_PATH:-$PROJECT_DIR/data/gatekeeper.db}"
