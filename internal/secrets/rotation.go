@@ -31,11 +31,16 @@ func (m *Manager) RotateAll() error {
 		return fmt.Errorf("secrets not loaded")
 	}
 
+	required := []string{
+		"GOFHIR_AUDIT_HMAC_KEY",
+		"GOFHIR_JWT_SECRET",
+	}
+
 	if err := m.createBackup(); err != nil {
 		return fmt.Errorf("backup failed: %w", err)
 	}
 
-	for key := range m.secretsFile.Secrets {
+	for _, key := range required {
 		newValue, err := generateSecretValue(key)
 		if err != nil {
 			return fmt.Errorf("generate secret %s: %w", key, err)

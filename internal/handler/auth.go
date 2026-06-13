@@ -236,9 +236,9 @@ func (h *AuthHandler) appendAuditEntry(action, actorID, sessionID string, auditE
 	if err != nil {
 		return
 	}
-	ctx := r.Context()
-	if ctx == nil {
-		ctx = context.Background()
+	ctx := context.Background()
+	if r != nil {
+		ctx = r.Context()
 	}
 	lastSeq, err := h.auditStore.LastSeq(ctx)
 	if err != nil {

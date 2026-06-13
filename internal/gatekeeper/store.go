@@ -178,8 +178,8 @@ func (s *Store) UserByID(ctx context.Context, id string) (*StoredUser, error) {
 
 func (s *Store) CreateSession(ctx context.Context, session *StoredSession) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO gatekeeper_sessions (id, user_id, role, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
-		session.ID, session.UserID, session.Role, session.CreatedAt.Format(time.RFC3339), session.ExpiresAt.Format(time.RFC3339))
+		`INSERT INTO gatekeeper_sessions (id, user_id, role, created_at, expires_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		session.ID, session.UserID, session.Role, session.CreatedAt.Format(time.RFC3339), session.ExpiresAt.Format(time.RFC3339), session.CreatedAt.Format(time.RFC3339))
 	return err
 }
 
