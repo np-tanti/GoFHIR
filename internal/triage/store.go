@@ -6,13 +6,13 @@ import (
 )
 
 type VitalSigns struct {
-	SystolicBP   int     `json:"systolic_bp"`
-	DiastolicBP  int     `json:"diastolic_bp"`
-	HeartRate    int     `json:"heart_rate"`
-	RespRate     int     `json:"resp_rate"`
-	OxygenSat    int     `json:"oxygen_sat"`
-	Temperature  float64 `json:"temperature"`
-	RecordedAt   string  `json:"recorded_at"`
+	SystolicBP  int     `json:"systolic_bp"`
+	DiastolicBP int     `json:"diastolic_bp"`
+	HeartRate   int     `json:"heart_rate"`
+	RespRate    int     `json:"resp_rate"`
+	OxygenSat   int     `json:"oxygen_sat"`
+	Temperature float64 `json:"temperature"`
+	RecordedAt  string  `json:"recorded_at"`
 }
 
 type Patient struct {

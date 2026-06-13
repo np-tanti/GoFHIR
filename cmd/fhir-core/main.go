@@ -43,11 +43,11 @@ func main() {
 
 	// Create handler
 	handler := &fhirCoreHandler{
-		store:        store,
-		triageStore:  triageStore,
-		triageHub:    triageHub,
-		auditClient:  auditClient,
-		cfg:          cfg,
+		store:       store,
+		triageStore: triageStore,
+		triageHub:   triageHub,
+		auditClient: auditClient,
+		cfg:         cfg,
 	}
 
 	mux := http.NewServeMux()
@@ -100,11 +100,11 @@ func main() {
 }
 
 type fhirCoreHandler struct {
-	store        *fhirstore.Store
-	triageStore  *triage.Store
-	triageHub    *triage.SSEHub
-	auditClient  *http.Client
-	cfg          *config
+	store       *fhirstore.Store
+	triageStore *triage.Store
+	triageHub   *triage.SSEHub
+	auditClient *http.Client
+	cfg         *config
 }
 
 func (h *fhirCoreHandler) live(w http.ResponseWriter, r *http.Request) {
@@ -131,14 +131,14 @@ func (h *fhirCoreHandler) capabilityStatement(w http.ResponseWriter, r *http.Req
 		return
 	}
 	stmt := map[string]any{
-		"resourceType": "CapabilityStatement",
-		"status":        "draft",
-		"date":          time.Now().UTC().Format("2006-01-02"),
-		"kind":          "instance",
-		"software":      map[string]string{"name": "gofhir", "version": "0.1.0"},
+		"resourceType":   "CapabilityStatement",
+		"status":         "draft",
+		"date":           time.Now().UTC().Format("2006-01-02"),
+		"kind":           "instance",
+		"software":       map[string]string{"name": "gofhir", "version": "0.1.0"},
 		"implementation": map[string]string{"description": "FHIR R4 API"},
-		"fhirVersion":   "4.0.1",
-		"format":        []string{"application/fhir+json"},
+		"fhirVersion":    "4.0.1",
+		"format":         []string{"application/fhir+json"},
 		"rest": []map[string]any{
 			{
 				"mode": "server",
@@ -218,9 +218,9 @@ func (h *fhirCoreHandler) searchType(w http.ResponseWriter, r *http.Request) {
 
 	bundle := map[string]any{
 		"resourceType": "Bundle",
-		"type":          "searchset",
-		"total":         res.Total,
-		"entry":         make([]map[string]any, 0, len(res.Resources)),
+		"type":         "searchset",
+		"total":        res.Total,
+		"entry":        make([]map[string]any, 0, len(res.Resources)),
 	}
 
 	for _, rec := range res.Resources {
@@ -294,9 +294,9 @@ func (h *fhirCoreHandler) historyForResource(w http.ResponseWriter, r *http.Requ
 
 	bundle := map[string]any{
 		"resourceType": "Bundle",
-		"type":          "history",
-		"total":         len(history),
-		"entry":         make([]map[string]any, 0, len(history)),
+		"type":         "history",
+		"total":        len(history),
+		"entry":        make([]map[string]any, 0, len(history)),
 	}
 
 	for _, rec := range history {
@@ -328,9 +328,9 @@ func (h *fhirCoreHandler) historyAll(w http.ResponseWriter, r *http.Request) {
 
 	bundle := map[string]any{
 		"resourceType": "Bundle",
-		"type":          "history",
-		"total":         res.Total,
-		"entry":         make([]map[string]any, 0, len(res.Resources)),
+		"type":         "history",
+		"total":        res.Total,
+		"entry":        make([]map[string]any, 0, len(res.Resources)),
 	}
 
 	for _, rec := range res.Resources {
@@ -506,16 +506,16 @@ func (h *fhirCoreHandler) triageSetESI(w http.ResponseWriter, r *http.Request) {
 
 func (h *fhirCoreHandler) writeAudit(r *http.Request, action string) {
 	payload, _ := json.Marshal(map[string]any{
-		"method":      r.Method,
-		"path":        r.URL.Path,
-		"remote":      r.RemoteAddr,
-		"action":      action,
+		"method": r.Method,
+		"path":   r.URL.Path,
+		"remote": r.RemoteAddr,
+		"action": action,
 	})
 
 	auditReq := map[string]any{
-		"action":    action,
-		"actor_id":  "system", // TODO: get from context if available
-		"payload":   string(payload),
+		"action":   action,
+		"actor_id": "system", // TODO: get from context if available
+		"payload":  string(payload),
 	}
 
 	// Fire-and-forget audit write
@@ -596,18 +596,18 @@ func parseBirthYear(dateStr string) int {
 }
 
 type config struct {
-	fhirDBPath   string
-	auditDBPath  string
+	fhirDBPath     string
+	auditDBPath    string
 	searchMaxCount int
-	corsOrigin   string
+	corsOrigin     string
 }
 
 func loadConfig() *config {
 	return &config{
-		fhirDBPath:    getEnv("GOFHIR_FHIR_DB_PATH", "data/gofhir_fhir.db"),
-		auditDBPath:   getEnv("GOFHIR_AUDIT_DB_PATH", "data/gofhir.db"),
+		fhirDBPath:     getEnv("GOFHIR_FHIR_DB_PATH", "data/gofhir_fhir.db"),
+		auditDBPath:    getEnv("GOFHIR_AUDIT_DB_PATH", "data/gofhir.db"),
 		searchMaxCount: 100,
-		corsOrigin:    getEnv("GOFHIR_CORS_ORIGIN", "*"),
+		corsOrigin:     getEnv("GOFHIR_CORS_ORIGIN", "*"),
 	}
 }
 

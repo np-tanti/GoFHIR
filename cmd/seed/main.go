@@ -153,11 +153,11 @@ func seedFHIR(ctx context.Context, s *fhirstore.Store) {
 		data string
 	}{
 		{
-			id: "pat-001",
+			id:   "pat-001",
 			data: `{"resourceType":"Patient","id":"pat-001","active":true,"name":[{"family":"Smith","given":["John"]}],"gender":"male","birthDate":"1980-05-15"}`,
 		},
 		{
-			id: "pat-002",
+			id:   "pat-002",
 			data: `{"resourceType":"Patient","id":"pat-002","active":true,"name":[{"family":"Jones","given":["Alice"]}],"gender":"female","birthDate":"1992-11-03"}`,
 		},
 	}

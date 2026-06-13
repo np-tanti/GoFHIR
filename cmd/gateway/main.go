@@ -18,12 +18,12 @@ import (
 
 	"github.com/graphic/gofhir/internal/auditor"
 	"github.com/graphic/gofhir/internal/config"
+	"github.com/graphic/gofhir/internal/ctxutil"
 	fhirstore "github.com/graphic/gofhir/internal/fhir/storage"
 	"github.com/graphic/gofhir/internal/gatekeeper"
 	"github.com/graphic/gofhir/internal/handler"
-	"github.com/graphic/gofhir/internal/triage"
-	"github.com/graphic/gofhir/internal/ctxutil"
 	gkTLS "github.com/graphic/gofhir/internal/tls"
+	"github.com/graphic/gofhir/internal/triage"
 )
 
 func main() {
@@ -65,7 +65,7 @@ func main() {
 	auditLogger := &auditLog{store: auditStore, key: key}
 	gk := gatekeeper.New(gkStore, jwtPublic)
 	fhir := handler.NewFHIR(fhirStore, cfg)
-	auth := handler.NewAuth(gkStore)
+	auth := handler.NewAuth(gkStore, auditStore)
 	auditH := handler.NewAudit(auditStore)
 	triageStore := triage.NewStore()
 	triageHub := triage.NewSSEHub()

@@ -16,9 +16,9 @@ import (
 	"time"
 
 	"github.com/graphic/gofhir/internal/auditor"
+	"github.com/graphic/gofhir/internal/ctxutil"
 	"github.com/graphic/gofhir/internal/gatekeeper"
 	"github.com/graphic/gofhir/internal/netutil"
-	"github.com/graphic/gofhir/internal/ctxutil"
 )
 
 func main() {

@@ -209,13 +209,13 @@ func bootstrapAudit(ctx context.Context, store *auditor.Store, key []byte) error
 }
 
 type config struct {
-	dbPath   string
+	dbPath  string
 	hmacKey string
 }
 
 func loadConfig() config {
 	return config{
-		dbPath:   getEnv("GOFHIR_DB_PATH", "data/gofhir.db"),
+		dbPath:  getEnv("GOFHIR_DB_PATH", "data/gofhir.db"),
 		hmacKey: os.Getenv("GOFHIR_AUDIT_HMAC_KEY"),
 	}
 }

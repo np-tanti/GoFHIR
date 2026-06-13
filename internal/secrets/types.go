@@ -13,10 +13,10 @@ type SecretEntry struct {
 }
 
 type SecretsFile struct {
-	Version   int                  `json:"version"`
-	CreatedAt time.Time            `json:"created_at"`
+	Version   int                    `json:"version"`
+	CreatedAt time.Time              `json:"created_at"`
 	Secrets   map[string]SecretEntry `json:"secrets"`
-	Metadata  map[string]string    `json:"metadata"`
+	Metadata  map[string]string      `json:"metadata"`
 }
 
 type Manager struct {

@@ -177,6 +177,9 @@ GOFHIR_TLS_KEY=/path/to/key.pem \
 - HMAC-SHA256 for integrity verification
 - Append-only (SQLite triggers prevent UPDATE/DELETE)
 - Offline verification tool: `bin/audit-verify`
+- **FHIR R4 compliant** AuditEvent structure
+- Tracks login/logout with credential type, remote address, and user agent
+- Comprehensive audit reports with date range filtering
 
 ### Fail-Closed
 - Gateway-Auth **refuses all requests** if Audit-Service is unreachable
@@ -190,6 +193,56 @@ GOFHIR_TLS_KEY=/path/to/key.pem \
 ### TLS 1.3
 - Enforced by TLS-Proxy
 - Optional mTLS for machine-to-machine auth
+
+---
+
+## Medical Compliance
+
+### FHIR R4 AuditEvent
+
+GoFHIR implements audit logging according to the **HL7 FHIR R4 AuditEvent** standard:
+- **Standard**: HL7 FHIR R4 (Release 4)
+- **Resource**: `AuditEvent` (https://www.hl7.org/fhir/auditevent.html)
+- **Compliance**: HIPAA-compliant audit trail
+
+### Audit Report Format
+
+The `/audit/report` endpoint generates comprehensive reports:
+
+```json
+{
+  "report_period": {
+    "start": "2026-01-01T00:00:00Z",
+    "end": "2026-01-31T23:59:59Z"
+  },
+  "summary": {
+    "total_entries": 1500,
+    "unique_users": 25,
+    "login_success": 1450,
+    "login_failure": 50,
+    "actions": {
+      "login": 500,
+      "logout": 480,
+      "fhir.read": 300,
+      "fhir.create": 120,
+      "fhir.update": 80
+    }
+  },
+  "compliance": {
+    "standard": "FHIR R4",
+    "hipaa_compliant": true,
+    "audit_chain_intact": true
+  }
+}
+```
+
+### Audit Chain Verification
+
+The audit log uses cryptographic chaining to ensure integrity:
+- Each entry contains a SHA-256 hash of the previous entry
+- HMAC-SHA256 signatures prevent tampering
+- Append-only database triggers prevent modification
+- Use `/audit/verify` to verify chain integrity
 
 ---
 
@@ -221,8 +274,107 @@ GOFHIR_TLS_KEY=/path/to/key.pem \
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/audit/event` | Append audit entry (internal) |
-| `GET` | `/audit/entries` | Read audit log (auditor-only) |
+| `POST` | `/auth/login` | User login (audit logged) |
+| `POST` | `/auth/logout` | User logout (audit logged) |
+| `GET` | `/audit/entries` | Read audit log with filtering |
+| `GET` | `/audit/report` | Generate comprehensive audit report |
+| `GET` | `/audit/verify` | Verify audit chain integrity |
+
+#### Audit Endpoints
+
+**List audit entries:**
+```bash
+# Basic listing
+curl -X GET https://localhost/audit/entries \
+  -H "Authorization: Bearer <token>"
+
+# Filter by action and user
+curl -X GET "https://localhost/audit/entries?action=login&actor_id=user-123" \
+  -H "Authorization: Bearer <token>"
+
+# Get FHIR-formatted entries
+curl -X GET "https://localhost/audit/entries?format=fhir" \
+  -H "Authorization: Bearer <token>"
+```
+
+**Generate audit report:**
+```bash
+# Last 30 days (default)
+curl -X GET https://localhost/audit/report \
+  -H "Authorization: Bearer <token>"
+
+# Custom date range
+curl -X GET "https://localhost/audit/report?start=2026-01-01T00:00:00Z&end=2026-01-31T23:59:59Z" \
+  -H "Authorization: Bearer <token>"
+
+# Filter by action
+curl -X GET "https://localhost/audit/report?action=login" \
+  -H "Authorization: Bearer <token>"
+```
+
+**Verify audit chain:**
+```bash
+curl -X GET https://localhost/audit/verify \
+  -H "Authorization: Bearer <token>"
+```
+
+#### Audit Event Structure (FHIR R4 Compliant)
+
+The audit system now logs events according to FHIR R4 AuditEvent standards:
+
+```json
+{
+  "resourceType": "AuditEvent",
+  "type": {
+    "system": "http://terminology.hl7.org/CodeSystem/audit-event-type",
+    "code": "rest",
+    "display": "RESTful Interaction"
+  },
+  "subtype": [{
+    "code": "login",
+    "display": "Login"
+  }],
+  "action": "E",
+  "recorded": "2026-01-15T10:30:00Z",
+  "outcome": "0",
+  "outcomeDesc": "Login successful",
+  "agent": [{
+    "requestor": true,
+    "userId": {
+      "system": "urn:ietf:rfc:3986",
+      "value": "user-123"
+    },
+    "name": "nurse-1",
+    "network": {
+      "address": "192.168.1.100",
+      "type": "1"
+    }
+  }],
+  "source": {
+    "type": [{
+      "code": "3",
+      "display": "Web Server"
+    }]
+  },
+  "entity": [{
+    "detail": [
+      {"type": "credentialType", "valueString": "password"},
+      {"type": "sessionId", "valueString": "abc123"},
+      {"type": "userAgent", "valueString": "Mozilla/5.0..."}
+    ]
+  }]
+}
+```
+
+#### Credential Types Tracked
+
+| Type | Description |
+|------|-------------|
+| `password` | Username/password authentication |
+| `jwt` | JWT token authentication |
+| `api-key` | API key authentication |
+| `mtls` | Mutual TLS client certificate |
+| `session` | Session cookie authentication |
 
 ### Health Checks
 

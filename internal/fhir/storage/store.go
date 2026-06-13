@@ -23,23 +23,23 @@ type Resource struct {
 }
 
 type SearchResult struct {
-	Resources  []*Resource
-	Total      int
-	Offset     int
-	Count      int
-	HasMore    bool
+	Resources []*Resource
+	Total     int
+	Offset    int
+	Count     int
+	HasMore   bool
 }
 
 type SearchFilters struct {
-	ID           string
-	LastUpdated  string
-	Name         string
-	Code         string
-	Subject      string
-	Count        int
-	Offset       int
-	MaxCount     int
-	DefaultCount int
+	ID            string
+	LastUpdated   string
+	Name          string
+	Code          string
+	Subject       string
+	Count         int
+	Offset        int
+	MaxCount      int
+	DefaultCount  int
 	DefaultOffset int
 }
 

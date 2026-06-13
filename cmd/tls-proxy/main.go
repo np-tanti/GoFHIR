@@ -8,8 +8,8 @@ import (
 	"syscall"
 	"time"
 
-	gkTLS "github.com/graphic/gofhir/internal/tls"
 	"github.com/graphic/gofhir/internal/netutil"
+	gkTLS "github.com/graphic/gofhir/internal/tls"
 )
 
 func main() {

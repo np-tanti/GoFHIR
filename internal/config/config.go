@@ -9,25 +9,25 @@ import (
 )
 
 type Config struct {
-	Port              string
-	DatabasePath      string
-	CORSOrigin        string
-	SearchMaxCount    int
-	DefaultOffset     int
-	DefaultCount      int
-	AuditHMACKey      string
-	JWTSecretKey      string
-	TLSCertFile       string
-	TLSKeyFile        string
-	TLSCAFile         string
-	MTLSEnabled       bool
-	GatekeeperDBPath  string
-	SessionMaxAge     int
-	RateLimitUnauth   int
-	RateLimitAuth     int
-	RateLimitBurst    int
-	RuntimeDir        string
-	FHIRDBPath        string
+	Port             string
+	DatabasePath     string
+	CORSOrigin       string
+	SearchMaxCount   int
+	DefaultOffset    int
+	DefaultCount     int
+	AuditHMACKey     string
+	JWTSecretKey     string
+	TLSCertFile      string
+	TLSKeyFile       string
+	TLSCAFile        string
+	MTLSEnabled      bool
+	GatekeeperDBPath string
+	SessionMaxAge    int
+	RateLimitUnauth  int
+	RateLimitAuth    int
+	RateLimitBurst   int
+	RuntimeDir       string
+	FHIRDBPath       string
 }
 
 func Load() *Config {

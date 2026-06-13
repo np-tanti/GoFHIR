@@ -47,9 +47,9 @@ func (cs *CertStore) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificat
 }
 
 type Terminator struct {
-	server     *http.Server
-	certStore  *CertStore
-	clientCAs  *x509.CertPool
+	server      *http.Server
+	certStore   *CertStore
+	clientCAs   *x509.CertPool
 	requireMTLS bool
 }
 
@@ -81,7 +81,7 @@ func New(addr string, certStore *CertStore, handler http.Handler, opts ...Option
 		opt(t)
 	}
 	tlsCfg := &tls.Config{
-		MinVersion:   tls.VersionTLS13,
+		MinVersion:     tls.VersionTLS13,
 		GetCertificate: certStore.GetCertificate,
 	}
 	if t.clientCAs != nil {

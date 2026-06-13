@@ -56,20 +56,20 @@ func readBody(r *http.Request) ([]byte, error) {
 
 func (h *FHIRHandler) CapabilityStatement(w http.ResponseWriter, r *http.Request) {
 	stmt := map[string]any{
-		"resourceType": "CapabilityStatement",
-		"status":        "draft",
-		"date":          time.Now().UTC().Format(FHIR_DATE_FMT),
-		"kind":          "instance",
-		"software":      map[string]string{"name": "gofhir", "version": "0.2.0"},
+		"resourceType":   "CapabilityStatement",
+		"status":         "draft",
+		"date":           time.Now().UTC().Format(FHIR_DATE_FMT),
+		"kind":           "instance",
+		"software":       map[string]string{"name": "gofhir", "version": "0.2.0"},
 		"implementation": map[string]string{"description": "FHIR R4 API"},
-		"fhirVersion":   "4.0.1",
-		"format":        []string{"application/fhir+json"},
+		"fhirVersion":    "4.0.1",
+		"format":         []string{"application/fhir+json"},
 		"rest": []map[string]any{
 			{
 				"mode": "server",
 				"resource": []map[string]any{
 					{
-						"type": "Patient",
+						"type":        "Patient",
 						"interaction": []map[string]string{{"code": "create"}, {"code": "read"}, {"code": "update"}, {"code": "delete"}, {"code": "search-type"}},
 					},
 				},
@@ -222,9 +222,9 @@ func (h *FHIRHandler) historyForResource(w http.ResponseWriter, r *http.Request)
 	}
 	bundle := map[string]any{
 		"resourceType": "Bundle",
-		"type":          "history",
-		"total":         len(history),
-		"entry":         make([]map[string]any, 0, len(history)),
+		"type":         "history",
+		"total":        len(history),
+		"entry":        make([]map[string]any, 0, len(history)),
 	}
 	for _, rec := range history {
 		bundle["entry"] = append(bundle["entry"].([]map[string]any), map[string]any{
@@ -254,9 +254,9 @@ func (h *FHIRHandler) searchType(w http.ResponseWriter, r *http.Request) {
 	}
 	bundle := map[string]any{
 		"resourceType": "Bundle",
-		"type":          "searchset",
-		"total":         res.Total,
-		"entry":         make([]map[string]any, 0, len(res.Resources)),
+		"type":         "searchset",
+		"total":        res.Total,
+		"entry":        make([]map[string]any, 0, len(res.Resources)),
 	}
 	for _, rec := range res.Resources {
 		bundle["entry"] = append(bundle["entry"].([]map[string]any), map[string]any{
@@ -270,9 +270,9 @@ func (h *FHIRHandler) searchType(w http.ResponseWriter, r *http.Request) {
 
 func (h *FHIRHandler) parseFilters(r *http.Request) storage.SearchFilters {
 	f := storage.SearchFilters{
-		Count:      h.cfg.DefaultCount,
-		Offset:     h.cfg.DefaultOffset,
-		MaxCount:   h.cfg.SearchMaxCount,
+		Count:    h.cfg.DefaultCount,
+		Offset:   h.cfg.DefaultOffset,
+		MaxCount: h.cfg.SearchMaxCount,
 	}
 	for k, v := range r.URL.Query() {
 		switch strings.ToLower(k) {
@@ -353,9 +353,9 @@ func (h *FHIRHandler) historyAll(w http.ResponseWriter, r *http.Request) {
 	}
 	bundle := map[string]any{
 		"resourceType": "Bundle",
-		"type":          "history",
-		"total":         res.Total,
-		"entry":         make([]map[string]any, 0, len(res.Resources)),
+		"type":         "history",
+		"total":        res.Total,
+		"entry":        make([]map[string]any, 0, len(res.Resources)),
 	}
 	for _, rec := range res.Resources {
 		bundle["entry"] = append(bundle["entry"].([]map[string]any), map[string]any{
