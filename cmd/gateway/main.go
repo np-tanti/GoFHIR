@@ -55,7 +55,7 @@ func main() {
 	}
 	defer fhirStore.Close()
 
-	gkStore, err := gatekeeper.OpenStore(cfg.GatekeeperDBPath)
+	gkStore, err := gatekeeper.OpenStore(cfg.GatekeeperDBPath, getEncryptionKey(cfg.DatabaseEncryptionKey))
 	if err != nil {
 		log.Fatalf("gatekeeper store open: %v", err)
 	}
@@ -63,13 +63,15 @@ func main() {
 
 	jwtPublic := loadOrGenerateJWTKey(cfg)
 	auditLogger := &auditLog{store: auditStore, key: key}
-	gk := gatekeeper.New(gkStore, jwtPublic)
-	fhir := handler.NewFHIR(fhirStore, cfg)
-	auth := handler.NewAuth(gkStore, auditStore)
-	auditH := handler.NewAudit(auditStore)
+	gk := gatekeeper.New(gkStore, jwtPublic, time.Duration(cfg.SessionIdleTimeout)*time.Second, time.Duration(cfg.SessionAbsoluteTimeout)*time.Second)
+	fhir := handler.NewFHIR(fhirStore, cfg, gkStore)
+	auth := handler.NewAuth(gkStore, auditStore, key, cfg.SessionAbsoluteTimeout)
+	auditH := handler.NewAudit(auditStore, key)
 	triageStore := triage.NewStore()
 	triageHub := triage.NewSSEHub()
 	triageH := handler.NewTriageHandler(triageStore, triageHub, fhirStore)
+
+	go startIdleCleanup(gkStore, time.Duration(cfg.SessionIdleTimeout)*time.Second)
 
 	mux := http.NewServeMux()
 	fhir.Register(mux)
@@ -178,6 +180,19 @@ func waitForShutdown(shutdown func() error) {
 	_ = shutdown()
 }
 
+func startIdleCleanup(store *gatekeeper.Store, idleTimeout time.Duration) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		if err := store.DeleteExpiredSessions(context.Background()); err != nil {
+			log.Printf("cleanup expired sessions: %v", err)
+		}
+		if err := store.DeleteIdleSessions(context.Background(), idleTimeout); err != nil {
+			log.Printf("cleanup idle sessions: %v", err)
+		}
+	}
+}
+
 type auditLog struct {
 	store *auditor.Store
 	key   []byte
@@ -264,4 +279,20 @@ func classifyAction(method, path string) string {
 		return "logout"
 	}
 	return ""
+}
+
+func getEncryptionKey(hexKey string) []byte {
+	if hexKey == "" {
+		return nil
+	}
+	key, err := hex.DecodeString(hexKey)
+	if err != nil {
+		log.Printf("invalid encryption key: %v", err)
+		return nil
+	}
+	if len(key) != 32 {
+		log.Printf("encryption key must be 32 bytes (64 hex chars)")
+		return nil
+	}
+	return key
 }

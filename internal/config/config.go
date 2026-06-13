@@ -9,25 +9,28 @@ import (
 )
 
 type Config struct {
-	Port             string
-	DatabasePath     string
-	CORSOrigin       string
-	SearchMaxCount   int
-	DefaultOffset    int
-	DefaultCount     int
-	AuditHMACKey     string
-	JWTSecretKey     string
-	TLSCertFile      string
-	TLSKeyFile       string
-	TLSCAFile        string
-	MTLSEnabled      bool
-	GatekeeperDBPath string
-	SessionMaxAge    int
-	RateLimitUnauth  int
-	RateLimitAuth    int
-	RateLimitBurst   int
-	RuntimeDir       string
-	FHIRDBPath       string
+	Port                   string
+	DatabasePath           string
+	CORSOrigin             string
+	SearchMaxCount         int
+	DefaultOffset          int
+	DefaultCount           int
+	AuditHMACKey           string
+	JWTSecretKey           string
+	TLSCertFile            string
+	TLSKeyFile             string
+	TLSCAFile              string
+	MTLSEnabled            bool
+	GatekeeperDBPath       string
+	SessionMaxAge          int
+	SessionIdleTimeout     int
+	SessionAbsoluteTimeout int
+	RateLimitUnauth        int
+	RateLimitAuth          int
+	RateLimitBurst         int
+	RuntimeDir             string
+	FHIRDBPath             string
+	DatabaseEncryptionKey  string
 }
 
 func Load() *Config {
@@ -54,6 +57,9 @@ func Load() *Config {
 	cfg.RateLimitBurst = getConfigIntValue(secretsMgr, "GOFHIR_RL_BURST", 20)
 	cfg.RuntimeDir = getConfigValue(secretsMgr, "GOFHIR_RUNTIME_DIR", "/run/gofhir")
 	cfg.FHIRDBPath = getConfigValue(secretsMgr, "GOFHIR_FHIR_DB_PATH", "data/gofhir_fhir.db")
+	cfg.SessionIdleTimeout = getConfigIntValue(secretsMgr, "GOFHIR_SESSION_IDLE_TIMEOUT", 900)
+	cfg.SessionAbsoluteTimeout = getConfigIntValue(secretsMgr, "GOFHIR_SESSION_ABSOLUTE_TIMEOUT", 28800)
+	cfg.DatabaseEncryptionKey = getConfigValue(secretsMgr, "GOFHIR_DB_ENCRYPTION_KEY", "")
 
 	return cfg
 }

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -25,7 +26,7 @@ func main() {
 	cfg := loadConfig()
 
 	// Open gatekeeper database
-	gkStore, err := gatekeeper.OpenStore(cfg.gkDBPath)
+	gkStore, err := gatekeeper.OpenStore(cfg.gkDBPath, getEncryptionKey(cfg.databaseEncryptionKey))
 	if err != nil {
 		log.Fatalf("gatekeeper store open: %v", err)
 	}
@@ -52,7 +53,7 @@ func main() {
 	}
 
 	// Create gatekeeper
-	gk := gatekeeper.New(gkStore, jwtPublic)
+	gk := gatekeeper.New(gkStore, jwtPublic, time.Duration(cfg.sessionIdleTimeout)*time.Second, time.Duration(cfg.sessionAbsoluteTimeout)*time.Second)
 
 	// Create proxy handler
 	proxyHandler := &reverseProxy{
@@ -219,18 +220,36 @@ func classifyAction(method, path string) string {
 }
 
 type appConfig struct {
-	gkDBPath     string
-	auditDBPath  string
-	auditHMACKey string
-	jwtSecret    string
+	gkDBPath               string
+	auditDBPath            string
+	auditHMACKey           string
+	jwtSecret              string
+	sessionIdleTimeout     int
+	sessionAbsoluteTimeout int
+	databaseEncryptionKey  string
 }
 
 func loadConfig() *appConfig {
+	idleTimeout := 900
+	absTimeout := 28800
+	if v := os.Getenv("GOFHIR_SESSION_IDLE_TIMEOUT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			idleTimeout = n
+		}
+	}
+	if v := os.Getenv("GOFHIR_SESSION_ABSOLUTE_TIMEOUT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			absTimeout = n
+		}
+	}
 	return &appConfig{
-		gkDBPath:     getEnv("GOFHIR_GK_DB_PATH", "data/gatekeeper.db"),
-		auditDBPath:  getEnv("GOFHIR_AUDIT_DB_PATH", "data/gofhir.db"),
-		auditHMACKey: os.Getenv("GOFHIR_AUDIT_HMAC_KEY"),
-		jwtSecret:    os.Getenv("GOFHIR_JWT_SECRET"),
+		gkDBPath:               getEnv("GOFHIR_GK_DB_PATH", "data/gatekeeper.db"),
+		auditDBPath:            getEnv("GOFHIR_AUDIT_DB_PATH", "data/gofhir.db"),
+		auditHMACKey:           os.Getenv("GOFHIR_AUDIT_HMAC_KEY"),
+		jwtSecret:              os.Getenv("GOFHIR_JWT_SECRET"),
+		sessionIdleTimeout:     idleTimeout,
+		sessionAbsoluteTimeout: absTimeout,
+		databaseEncryptionKey:  os.Getenv("GOFHIR_DB_ENCRYPTION_KEY"),
 	}
 }
 
@@ -256,6 +275,22 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func getEncryptionKey(hexKey string) []byte {
+	if hexKey == "" {
+		return nil
+	}
+	key, err := hex.DecodeString(hexKey)
+	if err != nil {
+		log.Printf("invalid encryption key: %v", err)
+		return nil
+	}
+	if len(key) != 32 {
+		log.Printf("encryption key must be 32 bytes (64 hex chars)")
+		return nil
+	}
+	return key
 }
 
 func waitForShutdown(shutdown func() error) {

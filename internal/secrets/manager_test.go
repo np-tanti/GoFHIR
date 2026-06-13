@@ -123,8 +123,16 @@ func TestInvalidMasterKey(t *testing.T) {
 	os.Unsetenv("GOFHIR_MASTER_KEY")
 	secretsFile := filepath.Join(t.TempDir(), "nonexistent.enc")
 
-	_, err := NewManager(secretsFile)
+	// NewManager doesn't require master key at creation time
+	mgr, err := NewManager(secretsFile)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	// But Load() should fail if master key is missing
+	os.Unsetenv("GOFHIR_MASTER_KEY")
+	err = mgr.Load()
 	if err == nil {
-		t.Error("expected error for missing master key")
+		t.Error("expected error for missing master key when loading")
 	}
 }

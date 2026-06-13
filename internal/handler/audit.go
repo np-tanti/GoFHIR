@@ -2,6 +2,9 @@ package handler
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -12,11 +15,12 @@ import (
 )
 
 type AuditHandler struct {
-	store *auditor.Store
+	store   *auditor.Store
+	hmacKey []byte
 }
 
-func NewAudit(store *auditor.Store) *AuditHandler {
-	return &AuditHandler{store: store}
+func NewAudit(store *auditor.Store, hmacKey []byte) *AuditHandler {
+	return &AuditHandler{store: store, hmacKey: hmacKey}
 }
 
 type auditEntryResponse struct {
@@ -150,10 +154,7 @@ func (h *AuditHandler) VerifyChain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get HMAC key (should come from config)
-	hmacKey := make([]byte, 32) // This should come from environment variable
-
-	// Verify chain
+	hmacKey := h.hmacKey
 	invalidIdx := auditor.VerifyChain(entries, hmacKey)
 	valid := invalidIdx == -1
 
@@ -271,4 +272,75 @@ func (h *AuditHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /audit/entries", h.ListEntries)
 	mux.HandleFunc("GET /audit/report", h.GetReport)
 	mux.HandleFunc("GET /audit/verify", h.VerifyChain)
+	mux.HandleFunc("GET /audit/export", h.ExportBundle)
+}
+
+// ExportBundle exports audit entries as FHIR Bundle with optional detached signature
+func (h *AuditHandler) ExportBundle(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	format := q.Get("format") // "fhir" or "detached"
+
+	// Read all entries
+	count, err := h.store.Count(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	entries, err := h.store.ReadRange(r.Context(), 1, uint64(count))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Build FHIR Bundle
+	fhirEvents := make([]auditor.FHIRAuditEvent, 0, len(entries))
+	for _, e := range entries {
+		if len(e.Payload) > 0 {
+			var event auditor.FHIRAuditEvent
+			if err := json.Unmarshal(e.Payload, &event); err == nil {
+				fhirEvents = append(fhirEvents, event)
+			}
+		}
+	}
+
+	bundle := map[string]interface{}{
+		"resourceType": "Bundle",
+		"type":         "collection",
+		"total":        len(fhirEvents),
+		"entry":        make([]map[string]interface{}, 0, len(fhirEvents)),
+	}
+	for _, event := range fhirEvents {
+		bundle["entry"] = append(bundle["entry"].([]map[string]interface{}), map[string]interface{}{
+			"resource": event,
+		})
+	}
+
+	// If detached format requested, add signature
+	if format == "detached" {
+		sig := h.generateDetachedSignature(bundle)
+		w.Header().Set("Content-Type", "application/fhir+json")
+		w.Header().Set("X-Audit-Signature", sig)
+		json.NewEncoder(w).Encode(bundle)
+		return
+	}
+
+	// Default: return FHIR Bundle
+	w.Header().Set("Content-Type", "application/fhir+json")
+	json.NewEncoder(w).Encode(bundle)
+}
+
+// generateDetachedSignature generates a detached HMAC signature for the bundle
+func (h *AuditHandler) generateDetachedSignature(bundle interface{}) string {
+	data, err := json.Marshal(bundle)
+	if err != nil {
+		return ""
+	}
+	if len(h.hmacKey) == 0 {
+		return ""
+	}
+	mac := hmac.New(sha256.New, h.hmacKey)
+	mac.Write(data)
+	signature := mac.Sum(nil)
+	return base64.StdEncoding.EncodeToString(signature)
 }

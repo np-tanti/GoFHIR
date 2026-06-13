@@ -11,7 +11,7 @@ func openTestStore(t *testing.T) *Store {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "gk_test.db")
-	s, err := OpenStore(path)
+	s, err := OpenStore(path, nil)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

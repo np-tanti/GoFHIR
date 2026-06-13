@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"strings"
@@ -32,6 +33,7 @@ func main() {
 	seedUsers(ctx, gkStore)
 	seedAPIKeys(ctx, gkStore)
 	seedFHIR(ctx, fhirStore)
+	seedPatientAssignments(ctx, gkStore)
 	seedAudit(ctx, auditStore, auditKey)
 
 	fmt.Println("seed complete")
@@ -57,11 +59,28 @@ func mustOpenAudit(cfg *config.Config) *auditor.Store {
 }
 
 func mustOpenGK(cfg *config.Config) *gatekeeper.Store {
-	s, err := gatekeeper.OpenStore(cfg.GatekeeperDBPath)
+	key := getEncryptionKey(cfg.DatabaseEncryptionKey)
+	s, err := gatekeeper.OpenStore(cfg.GatekeeperDBPath, key)
 	if err != nil {
 		log.Fatalf("gatekeeper open: %v", err)
 	}
 	return s
+}
+
+func getEncryptionKey(hexKey string) []byte {
+	if hexKey == "" {
+		return nil
+	}
+	key, err := hex.DecodeString(hexKey)
+	if err != nil {
+		log.Printf("invalid encryption key: %v", err)
+		return nil
+	}
+	if len(key) != 32 {
+		log.Printf("encryption key must be 32 bytes (64 hex chars)")
+		return nil
+	}
+	return key
 }
 
 func mustOpenFHIR(path string) *fhirstore.Store {
@@ -108,6 +127,22 @@ func seedUsers(ctx context.Context, s *gatekeeper.Store) {
 			log.Fatalf("create user %s: %v", u.username, err)
 		}
 		fmt.Printf("created user %s (role=%s)\n", u.username, u.role)
+
+		// Generate TOTP secret for admin and auditor
+		if u.role == "admin" || u.role == "auditor" {
+			secret, provisioningURI, err := gatekeeper.GenerateTOTPSecret(u.username)
+			if err != nil {
+				log.Printf("WARNING: failed to generate TOTP secret for %s: %v", u.username, err)
+				continue
+			}
+			if err := s.EnableTOTP(ctx, u.username, secret); err != nil {
+				log.Printf("WARNING: failed to enable TOTP for %s: %v", u.username, err)
+				continue
+			}
+			fmt.Printf("  TOTP enabled for %s\n", u.username)
+			fmt.Printf("  Provisioning URI: %s\n", provisioningURI)
+			fmt.Printf("  Secret (base32): %s\n", secret)
+		}
 	}
 }
 
@@ -220,4 +255,23 @@ func seedAudit(ctx context.Context, s *auditor.Store, key []byte) {
 		log.Fatalf("append seed entry: %v", err)
 	}
 	fmt.Printf("appended audit seed entry seq=%d\n", e.Seq)
+}
+
+func seedPatientAssignments(ctx context.Context, s *gatekeeper.Store) {
+	assignments := []struct {
+		patientID string
+		userID    string
+		role      string
+	}{
+		{patientID: "pat-001", userID: "nurse-1", role: "viewer"},
+		{patientID: "pat-002", userID: "nurse-1", role: "viewer"},
+	}
+	for _, a := range assignments {
+		err := s.AssignPatient(ctx, a.patientID, a.userID, a.role)
+		if err != nil {
+			log.Printf("assign patient %s to %s: %v", a.patientID, a.userID, err)
+			continue
+		}
+		fmt.Printf("assigned patient %s to %s\n", a.patientID, a.userID)
+	}
 }

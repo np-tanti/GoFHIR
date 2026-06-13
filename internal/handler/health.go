@@ -38,35 +38,32 @@ func NewReady(store interface{ Ping(context.Context) error }) http.HandlerFunc {
 
 func CORS(cfg *config.Config) func(http.Handler) http.Handler {
 	allowed := cfg.CORSOrigin
-	if allowed == "*" {
-		return func(next http.Handler) http.Handler {
-			h := next
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Access-Control-Allow-Origin", "*")
-				if r.Method == http.MethodOptions {
-					w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-					w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Resource-Type")
-					w.WriteHeader(http.StatusNoContent)
-					return
-				}
-				h.ServeHTTP(w, r)
-			})
-		}
+	if allowed == "" || allowed == "*" {
+		allowed = ""
 	}
 	return func(next http.Handler) http.Handler {
-		h := next
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := r.Header.Get("Origin")
-			if origin == allowed || allowed == "*" {
+			if origin != "" && isOriginAllowed(origin, allowed) {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Resource-Type")
-				if r.Method == http.MethodOptions {
-					w.WriteHeader(http.StatusNoContent)
-					return
-				}
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Resource-Type, Authorization")
 			}
-			h.ServeHTTP(w, r)
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func isOriginAllowed(origin, allowed string) bool {
+	if allowed == "*" {
+		return true
+	}
+	if allowed == "" {
+		return false
+	}
+	return origin == allowed
 }

@@ -1,6 +1,7 @@
 package gatekeeper
 
 import (
+	"context"
 	"crypto/ed25519"
 	"fmt"
 	"net/http"
@@ -11,18 +12,22 @@ import (
 )
 
 type Gatekeeper struct {
-	store       *Store
-	jwtPublic   ed25519.PublicKey
-	rateLimiter *RateLimiter
-	unauthRL    *RateLimiter
+	store              *Store
+	jwtPublic          ed25519.PublicKey
+	rateLimiter        *RateLimiter
+	unauthRL           *RateLimiter
+	sessionIdleTimeout time.Duration
+	sessionAbsTimeout  time.Duration
 }
 
-func New(store *Store, jwtPublic ed25519.PublicKey) *Gatekeeper {
+func New(store *Store, jwtPublic ed25519.PublicKey, idleTimeout, absTimeout time.Duration) *Gatekeeper {
 	return &Gatekeeper{
-		store:       store,
-		jwtPublic:   jwtPublic,
-		rateLimiter: NewRateLimiter(50, 20),
-		unauthRL:    NewRateLimiter(5, 20),
+		store:              store,
+		jwtPublic:          jwtPublic,
+		rateLimiter:        NewRateLimiter(50, 20),
+		unauthRL:           NewRateLimiter(5, 20),
+		sessionIdleTimeout: idleTimeout,
+		sessionAbsTimeout:  absTimeout,
 	}
 }
 
@@ -37,6 +42,7 @@ func (g *Gatekeeper) Middleware(next http.Handler) http.Handler {
 				http.Error(w, "429 Too Many Requests", http.StatusTooManyRequests)
 				return
 			}
+			g.touchSession(user.SessionID)
 		} else {
 			if !g.unauthRL.Allow(ip) {
 				http.Error(w, "429 Too Many Requests", http.StatusTooManyRequests)
@@ -53,6 +59,12 @@ func (g *Gatekeeper) Middleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (g *Gatekeeper) touchSession(sessionID string) {
+	if sessionID != "" {
+		_ = g.store.TouchSession(context.Background(), sessionID)
+	}
 }
 
 func (g *Gatekeeper) authenticate(r *http.Request) (ctxutil.User, bool) {
@@ -72,6 +84,10 @@ func (g *Gatekeeper) authenticate(r *http.Request) (ctxutil.User, bool) {
 	if sessionID := readSessionCookie(r); sessionID != "" {
 		session, err := g.store.SessionByID(r.Context(), sessionID)
 		if err == nil && session != nil && session.ExpiresAt.After(time.Now()) {
+			if time.Since(session.LastActiveAt) > g.sessionIdleTimeout {
+				_ = g.store.DeleteSession(r.Context(), sessionID)
+				return ctxutil.User{}, false
+			}
 			return ctxutil.User{ID: session.UserID, Role: session.Role, SessionID: session.ID}, true
 		}
 	}

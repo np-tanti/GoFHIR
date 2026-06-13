@@ -149,20 +149,16 @@ GOFHIR_TLS_KEY=/path/to/key.pem \
 | `GOFHIR_RL_UNAUTH` | `10` | Rate limit for unauthenticated requests |
 | `GOFHIR_RL_AUTH` | `100` | Rate limit for authenticated requests |
 | `GOFHIR_RL_BURST` | `50` | Burst limit |
-
-### Audit-Service
-
-| Variable | Default | Description |
-|---|---|---|
-| `GOFHIR_DB_PATH` | `data/gofhir.db` | Audit database path |
-| `GOFHIR_AUDIT_HMAC_KEY` | **required** | HMAC key for audit chain |
+| `GOFHIR_SESSION_IDLE_TIMEOUT` | `900` | Session idle timeout (seconds) |
+| `GOFHIR_SESSION_ABSOLUTE_TIMEOUT` | `28800` | Session absolute timeout (seconds) |
+| `GOFHIR_DB_ENCRYPTION_KEY` | *(optional)* | AES-256-GCM key (64 hex chars) for at-rest encryption |
 
 ### FHIR-Core
 
 | Variable | Default | Description |
 |---|---|---|
 | `GOFHIR_FHIR_DB_PATH` | `data/gofhir_fhir.db` | FHIR database path |
-| `GOFHIR_CORS_ORIGIN` | `*` | CORS origin header |
+| `GOFHIR_CORS_ORIGIN` | `` (empty) | CORS origin header (set to specific origin for production) |
 
 ---
 
@@ -172,6 +168,29 @@ GOFHIR_TLS_KEY=/path/to/key.pem \
 - Every request is **authenticated**, **authorized**, and **audited**
 - No direct access to FHIR-Core from outside (only via Gateway-Auth)
 
+### Multi-Factor Authentication (MFA)
+- TOTP-based MFA for privileged roles (`admin`, `auditor`, `system`)
+- Endpoints: `POST /auth/mfa/setup`, `POST /auth/mfa/verify`
+- Login flow requires `totp_code` if MFA is enabled for the user
+- TOTP secrets encrypted at rest using AES-256-GCM
+
+### Session Timeout Enforcement
+- **Idle timeout**: Sessions expire after `GOFHIR_SESSION_IDLE_TIMEOUT` seconds of inactivity (default: 900s / 15 min)
+- **Absolute timeout**: Sessions expire after `GOFHIR_SESSION_ABSOLUTE_TIMEOUT` seconds regardless of activity (default: 28800s / 8h)
+- Session activity tracked via `last_active_at` column
+- Background cleanup ticker runs every 5 minutes
+
+### Patient-Level Access Control
+- **Organizational/ward model**: Nurses see only patients assigned to them
+- **Admins/system**: See all patients (no filtering)
+- Assignment table: `patient_assignments (patient_id, user_id, role)`
+- FHIR search automatically filters by assigned patients for non-admin roles
+
+### At-Rest Encryption
+- Field-level encryption for sensitive data (TOTP secrets)
+- AES-256-GCM encryption using `GOFHIR_DB_ENCRYPTION_KEY`
+- Backward compatible: operates unencrypted if key not set
+
 ### Immutable Audit Log
 - Cryptographic chain (SHA-256 hash of previous entry)
 - HMAC-SHA256 for integrity verification
@@ -180,6 +199,7 @@ GOFHIR_TLS_KEY=/path/to/key.pem \
 - **FHIR R4 compliant** AuditEvent structure
 - Tracks login/logout with credential type, remote address, and user agent
 - Comprehensive audit reports with date range filtering
+- Export as FHIR Bundle or with detached HMAC signature
 
 ### Fail-Closed
 - Gateway-Auth **refuses all requests** if Audit-Service is unreachable
@@ -204,6 +224,48 @@ GoFHIR implements audit logging according to the **HL7 FHIR R4 AuditEvent** stan
 - **Standard**: HL7 FHIR R4 (Release 4)
 - **Resource**: `AuditEvent` (https://www.hl7.org/fhir/auditevent.html)
 - **Compliance**: HIPAA-compliant audit trail
+
+### Session Timeout Enforcement
+
+GoFHIR enforces both idle and absolute session timeouts:
+- **Idle timeout**: Sessions expire after `GOFHIR_SESSION_IDLE_TIMEOUT` seconds of inactivity (default: 900s / 15 min)
+- **Absolute timeout**: Sessions expire after `GOFHIR_SESSION_ABSOLUTE_TIMEOUT` seconds regardless of activity (default: 28800s / 8h)
+- **Session tracking**: `last_active_at` column tracks session activity
+- **Background cleanup**: Ticker runs every 5 minutes to delete expired/idle sessions
+
+### Multi-Factor Authentication (MFA)
+
+GoFHIR supports TOTP-based MFA for privileged roles:
+- **TOTP enforcement**: Required for `admin`, `auditor`, and `system` roles
+- **Endpoints**:
+  - `POST /auth/mfa/setup` - Generate TOTP secret and provisioning URI
+  - `POST /auth/mfa/verify` - Validate TOTP code and enable MFA
+  - `POST /auth/login` - Requires `totp_code` field if MFA is enabled
+- **Seed**: TOTP secrets auto-generated for `admin-1` and `auditor-1` during seeding
+- **Encryption**: TOTP secrets encrypted at rest using AES-256-GCM
+
+### Patient-Level Access Control
+
+GoFHIR implements organizational/ward-based patient access control:
+- **Model**: Nurses see only patients assigned to them via `patient_assignments` table
+- **Admins/system**: See all patients (no filtering)
+- **Table**: `patient_assignments (patient_id, user_id, role)`
+- **Endpoints**: `POST /fhir/assign` (admin only) to assign patients
+- **Search filtering**: Non-admin FHIR searches automatically filter by assigned patients
+
+### At-Rest Encryption
+
+Sensitive data is encrypted at rest:
+- **Field-level encryption**: TOTP secrets encrypted using AES-256-GCM
+- **Key management**: `GOFHIR_DB_ENCRYPTION_KEY` (32-byte hex) via environment or secrets manager
+- **Backward compatible**: If key not set, operates unencrypted
+
+### Audit Export
+
+GoFHIR supports standards-compliant audit export:
+- **FHIR Bundle**: `GET /audit/export?format=fhir` returns Bundle of AuditEvent resources
+- **Detached signature**: `GET /audit/export?format=detached` includes HMAC-SHA256 signature in `X-Audit-Signature` header
+- **Compliance**: Ready for off-site archival and regulatory review
 
 ### Audit Report Format
 
@@ -253,12 +315,15 @@ The audit log uses cryptographic chaining to ensure integrity:
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/fhir/` | CapabilityStatement |
-| `POST` | `/fhir/` | Create Patient |
-| `GET` | `/fhir/Patient/{id}` | Read Patient |
-| `PUT` | `/fhir/Patient/{id}` | Update Patient |
-| `DELETE` | `/fhir/Patient/{id}` | Delete Patient (soft) |
-| `GET` | `/fhir/Patient` | Search Patients |
-| `GET` | `/fhir/Patient/{id}/_history` | Version history |
+| `POST` | `/fhir/` | Create Patient/Observation |
+| `GET` | `/fhir/{type}/{id}` | Read resource (access controlled) |
+| `PUT` | `/fhir/{type}/{id}` | Update resource (access controlled) |
+| `DELETE` | `/fhir/{type}/{id}` | Delete resource (soft, access controlled) |
+| `GET` | `/fhir/{type}` | Search resources (filtered by patient assignments) |
+| `GET` | `/fhir/{type}/{id}/_history` | Version history |
+| `GET` | `/fhir/{type}/{id}/_history/{version}` | Read specific version |
+
+**Note**: Patient-level access control enforced for `Patient` and `Observation` resources. Non-admin users see only assigned patients.
 
 ### Triage Board (via Gateway-Auth → FHIR-Core)
 
@@ -274,11 +339,14 @@ The audit log uses cryptographic chaining to ensure integrity:
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/auth/login` | User login (audit logged) |
+| `POST` | `/auth/login` | User login (audit logged, MFA required for privileged roles) |
 | `POST` | `/auth/logout` | User logout (audit logged) |
+| `POST` | `/auth/mfa/setup` | Generate TOTP secret (requires auth) |
+| `POST` | `/auth/mfa/verify` | Validate TOTP code and enable MFA |
 | `GET` | `/audit/entries` | Read audit log with filtering |
 | `GET` | `/audit/report` | Generate comprehensive audit report |
 | `GET` | `/audit/verify` | Verify audit chain integrity |
+| `GET` | `/audit/export` | Export audit as FHIR Bundle (`?format=fhir`) or with detached signature (`?format=detached`) |
 
 #### Audit Endpoints
 

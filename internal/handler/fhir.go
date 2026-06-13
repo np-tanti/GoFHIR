@@ -11,16 +11,19 @@ import (
 	"time"
 
 	"github.com/graphic/gofhir/internal/config"
+	"github.com/graphic/gofhir/internal/ctxutil"
 	"github.com/graphic/gofhir/internal/fhir/storage"
+	"github.com/graphic/gofhir/internal/gatekeeper"
 )
 
 type FHIRHandler struct {
-	store *storage.Store
-	cfg   *config.Config
+	store   *storage.Store
+	cfg     *config.Config
+	gkStore *gatekeeper.Store
 }
 
-func NewFHIR(store *storage.Store, cfg *config.Config) *FHIRHandler {
-	return &FHIRHandler{store: store, cfg: cfg}
+func NewFHIR(store *storage.Store, cfg *config.Config, gkStore *gatekeeper.Store) *FHIRHandler {
+	return &FHIRHandler{store: store, cfg: cfg, gkStore: gkStore}
 }
 
 type operationOutcome struct {
@@ -155,6 +158,12 @@ func (h *FHIRHandler) readVersion(w http.ResponseWriter, r *http.Request) {
 
 func (h *FHIRHandler) readLatest(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if h.needsPatientAccess(r, id) {
+		if !h.checkPatientAccess(r, id) {
+			h.writeOO(w, r, newOO("error", "forbidden", "access denied to patient"), http.StatusForbidden)
+			return
+		}
+	}
 	rec, err := h.store.Read(r.Context(), id)
 	if err != nil {
 		h.writeOO(w, r, newOO("error", "not-found", err.Error()), http.StatusNotFound)
@@ -166,7 +175,12 @@ func (h *FHIRHandler) readLatest(w http.ResponseWriter, r *http.Request) {
 
 func (h *FHIRHandler) update(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	resourceType := r.PathValue("type")
+	if h.needsPatientAccess(r, id) {
+		if !h.checkPatientAccess(r, id) {
+			h.writeOO(w, r, newOO("error", "forbidden", "access denied to patient"), http.StatusForbidden)
+			return
+		}
+	}
 	data, err := readBody(r)
 	if err != nil {
 		h.error(w, r, http.StatusBadRequest, "read body", err)
@@ -181,8 +195,8 @@ func (h *FHIRHandler) update(w http.ResponseWriter, r *http.Request) {
 		h.writeOO(w, r, newOO("error", "invalid", "invalid json"), http.StatusBadRequest)
 		return
 	}
-	if rt, ok := obj["resourceType"].(string); ok && rt != "" && rt != resourceType {
-		obj["resourceType"] = resourceType
+	if rt, ok := obj["resourceType"].(string); ok && rt != "" && rt != r.PathValue("type") {
+		obj["resourceType"] = r.PathValue("type")
 		data, _ = json.Marshal(obj)
 	}
 	rec := &storage.Resource{ID: id, Data: data}
@@ -206,6 +220,12 @@ func (h *FHIRHandler) update(w http.ResponseWriter, r *http.Request) {
 
 func (h *FHIRHandler) softDelete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if h.needsPatientAccess(r, id) {
+		if !h.checkPatientAccess(r, id) {
+			h.writeOO(w, r, newOO("error", "forbidden", "access denied to patient"), http.StatusForbidden)
+			return
+		}
+	}
 	if err := h.store.SoftDelete(r.Context(), id); err != nil {
 		h.writeOO(w, r, newOO("error", "not-found", err.Error()), http.StatusNotFound)
 		return
@@ -247,6 +267,25 @@ func (h *FHIRHandler) searchType(w http.ResponseWriter, r *http.Request) {
 	}
 	filters := h.parseFilters(r)
 	filters.MaxCount = h.cfg.SearchMaxCount
+
+	// Filter by patient assignments for non-admin users
+	if resourceType == "patient" {
+		user, ok := ctxutil.UserFrom(r.Context())
+		if ok && user.Role != "admin" && user.Role != "system" {
+			patientIDs, err := h.gkStore.GetUserPatients(r.Context(), user.ID)
+			if err != nil {
+				h.writeOO(w, r, newOO("error", "exception", "failed to get patient assignments"), http.StatusInternalServerError)
+				return
+			}
+			if len(patientIDs) == 0 {
+				// No patient assignments, return empty result
+				h.writeEmptyBundle(w)
+				return
+			}
+			filters.PatientIDs = patientIDs
+		}
+	}
+
 	res, err := h.store.Search(r.Context(), resourceType, filters)
 	if err != nil {
 		h.writeOO(w, r, newOO("error", "exception", err.Error()), http.StatusInternalServerError)
@@ -321,8 +360,11 @@ func (h *FHIRHandler) resolveResourceType(r *http.Request) string {
 }
 
 func (h *FHIRHandler) error(w http.ResponseWriter, r *http.Request, code int, ctx string, err error) {
-	// logf disabled
-	h.writeOO(w, r, newOO("error", "exception", ctx+": failed"), code)
+	diagnostics := err.Error()
+	if diagnostics == "" {
+		diagnostics = ctx + ": failed"
+	}
+	h.writeOO(w, r, newOO("error", "exception", diagnostics), code)
 }
 
 func (h *FHIRHandler) writeOO(w http.ResponseWriter, r *http.Request, oo operationOutcome, code int) {
@@ -331,18 +373,40 @@ func (h *FHIRHandler) writeOO(w http.ResponseWriter, r *http.Request, oo operati
 	_ = json.NewEncoder(w).Encode(oo)
 }
 
+func (h *FHIRHandler) writeEmptyBundle(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/fhir+json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"resourceType": "Bundle",
+		"type":         "searchset",
+		"total":        0,
+		"entry":        []any{},
+	})
+}
+
 const FHIR_DATE_FMT = "2006-01-02"
 
-func (h *FHIRHandler) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /fhir/", h.CapabilityStatement)
-	mux.HandleFunc("POST /fhir/", h.Create)
-	mux.HandleFunc("GET /fhir/_history", h.historyAll)
-	mux.HandleFunc("GET /fhir/{type}", h.searchType)
-	mux.HandleFunc("GET /fhir/{type}/{id}", h.readLatest)
-	mux.HandleFunc("PUT /fhir/{type}/{id}", h.update)
-	mux.HandleFunc("DELETE /fhir/{type}/{id}", h.softDelete)
-	mux.HandleFunc("GET /fhir/{type}/{id}/_history", h.historyForResource)
-	mux.HandleFunc("GET /fhir/{type}/{id}/_history/{version}", h.readVersion)
+func (h *FHIRHandler) needsPatientAccess(r *http.Request, resourceID string) bool {
+	resourceType := r.PathValue("type")
+	if resourceType == "" {
+		resourceType = "patient"
+	}
+	resourceType = strings.ToLower(resourceType)
+	return resourceType == "patient" || resourceType == "observation" || resourceType == "encounter"
+}
+
+func (h *FHIRHandler) checkPatientAccess(r *http.Request, resourceID string) bool {
+	user, ok := ctxutil.UserFrom(r.Context())
+	if !ok {
+		return false
+	}
+	if user.Role == "admin" || user.Role == "system" {
+		return true
+	}
+	hasAccess, err := h.gkStore.UserHasPatientAccess(r.Context(), resourceID, user.ID, user.Role)
+	if err != nil {
+		return false
+	}
+	return hasAccess
 }
 
 func (h *FHIRHandler) historyAll(w http.ResponseWriter, r *http.Request) {
@@ -367,4 +431,16 @@ func (h *FHIRHandler) historyAll(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/fhir+json")
 	_ = json.NewEncoder(w).Encode(bundle)
+}
+
+func (h *FHIRHandler) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /fhir/", h.CapabilityStatement)
+	mux.HandleFunc("POST /fhir/", h.Create)
+	mux.HandleFunc("GET /fhir/_history", h.historyAll)
+	mux.HandleFunc("GET /fhir/{type}", h.searchType)
+	mux.HandleFunc("GET /fhir/{type}/{id}", h.readLatest)
+	mux.HandleFunc("PUT /fhir/{type}/{id}", h.update)
+	mux.HandleFunc("DELETE /fhir/{type}/{id}", h.softDelete)
+	mux.HandleFunc("GET /fhir/{type}/{id}/_history", h.historyForResource)
+	mux.HandleFunc("GET /fhir/{type}/{id}/_history/{version}", h.readVersion)
 }

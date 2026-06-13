@@ -62,6 +62,16 @@ func decrypt(masterKey []byte, ciphertext []byte) ([]byte, error) {
 	return plaintext, nil
 }
 
+// Encrypt encrypts plaintext using AES-256-GCM with the given master key (32 bytes).
+func Encrypt(masterKey []byte, plaintext []byte) ([]byte, error) {
+	return encrypt(masterKey, plaintext)
+}
+
+// Decrypt decrypts ciphertext using AES-256-GCM with the given master key (32 bytes).
+func Decrypt(masterKey []byte, ciphertext []byte) ([]byte, error) {
+	return decrypt(masterKey, ciphertext)
+}
+
 func encryptToBase64(masterKey []byte, plaintext []byte) (string, error) {
 	ciphertext, err := encrypt(masterKey, plaintext)
 	if err != nil {

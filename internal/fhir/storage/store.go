@@ -36,6 +36,7 @@ type SearchFilters struct {
 	Name          string
 	Code          string
 	Subject       string
+	PatientIDs    []string
 	Count         int
 	Offset        int
 	MaxCount      int
@@ -427,6 +428,14 @@ func (s *Store) Search(ctx context.Context, resourceType string, f SearchFilters
 	if f.Subject != "" {
 		where = append(where, "json_extract(data, '$.subject.reference') = ? OR json_extract(data, '$.subject.display') LIKE ? ESCAPE '\\'")
 		args = append(args, f.Subject, "%"+f.Subject+"%")
+	}
+	if len(f.PatientIDs) > 0 && resourceType == "patient" {
+		placeholders := make([]string, len(f.PatientIDs))
+		for i, id := range f.PatientIDs {
+			placeholders[i] = "?"
+			args = append(args, id)
+		}
+		where = append(where, "id IN ("+strings.Join(placeholders, ",")+")")
 	}
 	whereStr := strings.Join(where, " AND ")
 	var total int
